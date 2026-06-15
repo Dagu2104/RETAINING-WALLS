@@ -185,7 +185,7 @@ with col_der:
     if not errores:
         geometria = generar_puntos_muro(datos)
         fig, ax = plt.subplots(figsize=(9, 6))
-        dibujar_muro(ax, datos, geometria)
+        dibujar_muro(ax, datos, geometria, tamano_texto=tamano_texto_cotas)
 
         st.pyplot(fig, clear_figure=True)
     else:

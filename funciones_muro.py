@@ -189,58 +189,113 @@ def dibujar_poligono(ax, puntos: list[tuple[float, float]], etiqueta: str):
     ax.add_patch(poligono)
 
 
-def dibujar_cotas_principales(ax, datos: DatosMuro, geometria: dict):
+def dibujar_cotas_principales(ax, datos: DatosMuro, geometria: dict | None = None, tamano_texto: int = 8):
     """
-    Dibuja cotas geométricas básicas sobre el esquema.
+    Dibuja las cotas principales del muro.
 
-    Incluye la altura del fuste, el ancho total de zapata, la puntera, el talón
-    y el espesor de la zapata. Las cotas son orientativas para revisión visual.
+    Las cotas inferiores se separan en distintos niveles:
+    - puntera y talón quedan en un primer nivel;
+    - el ancho total B queda en un segundo nivel más bajo.
+
+    Para bajar o subir específicamente la flecha de B, modifica:
+    - y_cota_total
+    - y_texto_total
     """
     talon = calcular_talon(datos)
 
+    # Cotas de puntera y talón.
+    y_cota_puntera_talon = -datos.hz - 0.18
+    y_texto_puntera_talon = -datos.hz - 0.26
+
+    # Cota del ancho total B.
+    # Para bajar más la flecha y el texto de B, aumenta estos valores: 1.35 y 1.48.
+    y_cota_total = -datos.hz - 1.35
+    y_texto_total = -datos.hz - 1.48
+
+    # Cota vertical de altura del fuste H.
     ax.annotate(
         "",
         xy=(-0.25, 0),
         xytext=(-0.25, datos.H),
-        arrowprops=dict(arrowstyle="<->", linewidth=1.2)
-    )
-    ax.text(-0.35, datos.H / 2, f"H = {datos.H:.2f} m", rotation=90, va="center", ha="right")
-
-    ax.annotate(
-        "",
-        xy=(0, -datos.hz - 0.35),
-        xytext=(datos.B, -datos.hz - 0.35),
-        arrowprops=dict(arrowstyle="<->", linewidth=1.2)
-    )
-    ax.text(datos.B / 2, -datos.hz - 0.48, f"B = {datos.B:.2f} m", ha="center", va="top")
-
-    ax.annotate(
-        "",
-        xy=(0, -datos.hz - 0.15),
-        xytext=(datos.puntera, -datos.hz - 0.15),
         arrowprops=dict(arrowstyle="<->", linewidth=1.0)
     )
-    ax.text(datos.puntera / 2, -datos.hz - 0.22, f"Puntera = {datos.puntera:.2f} m", ha="center", va="top")
+    ax.text(
+        -0.33,
+        datos.H / 2,
+        f"H = {datos.H:.2f} m",
+        rotation=90,
+        va="center",
+        ha="right",
+        fontsize=tamano_texto
+    )
 
+    # Cota horizontal de la puntera.
+    ax.annotate(
+        "",
+        xy=(0, y_cota_puntera_talon),
+        xytext=(datos.puntera, y_cota_puntera_talon),
+        arrowprops=dict(arrowstyle="<->", linewidth=0.9)
+    )
+    ax.text(
+        datos.puntera / 2,
+        y_texto_puntera_talon,
+        f"Puntera = {datos.puntera:.2f} m",
+        ha="center",
+        va="top",
+        fontsize=tamano_texto
+    )
+
+    # Cota horizontal del talón.
     x_ini_talon = datos.puntera + datos.t_base
     ax.annotate(
         "",
-        xy=(x_ini_talon, -datos.hz - 0.15),
-        xytext=(datos.B, -datos.hz - 0.15),
-        arrowprops=dict(arrowstyle="<->", linewidth=1.0)
+        xy=(x_ini_talon, y_cota_puntera_talon),
+        xytext=(datos.B, y_cota_puntera_talon),
+        arrowprops=dict(arrowstyle="<->", linewidth=0.9)
     )
-    ax.text(x_ini_talon + talon / 2, -datos.hz - 0.22, f"Talón = {talon:.2f} m", ha="center", va="top")
+    ax.text(
+        x_ini_talon + talon / 2,
+        y_texto_puntera_talon,
+        f"Talón = {talon:.2f} m",
+        ha="center",
+        va="top",
+        fontsize=tamano_texto
+    )
 
+    # Cota horizontal del ancho total B. Está más abajo para evitar sobreposición.
     ax.annotate(
         "",
-        xy=(datos.B + 0.20, 0),
-        xytext=(datos.B + 0.20, -datos.hz),
+        xy=(0, y_cota_total),
+        xytext=(datos.B, y_cota_total),
         arrowprops=dict(arrowstyle="<->", linewidth=1.0)
     )
-    ax.text(datos.B + 0.27, -datos.hz / 2, f"hz = {datos.hz:.2f} m", rotation=90, va="center")
+    ax.text(
+        datos.B / 2,
+        y_texto_total,
+        f"B = {datos.B:.2f} m",
+        ha="center",
+        va="top",
+        fontsize=tamano_texto
+    )
 
+    # Cota vertical del espesor de zapata hz.
+    ax.annotate(
+        "",
+        xy=(datos.B + 0.18, 0),
+        xytext=(datos.B + 0.18, -datos.hz),
+        arrowprops=dict(arrowstyle="<->", linewidth=0.9)
+    )
+    ax.text(
+        datos.B + 0.25,
+        -datos.hz / 2,
+        f"hz = {datos.hz:.2f} m",
+        rotation=90,
+        va="center",
+        ha="left",
+        fontsize=tamano_texto
+    )
 
-def dibujar_muro(ax, datos: DatosMuro, geometria: dict):
+def dibujar_muro(ax, datos: DatosMuro, geometria: dict, tamano_texto: int = 8):
     """
     Dibuja el muro completo en un eje de Matplotlib.
 
@@ -267,12 +322,12 @@ def dibujar_muro(ax, datos: DatosMuro, geometria: dict):
         label="Nivel superior de zapata"
     )
 
-    dibujar_cotas_principales(ax, datos, geometria)
+    dibujar_cotas_principales(ax, datos, geometria, tamano_texto=tamano_texto)
 
     margen_x = max(datos.B * 0.25, 0.80)
     margen_y = max(datos.H * 0.20, 0.80)
 
-    y_min = -datos.hz - (datos.profundidad_llave if datos.usar_llave else 0) - margen_y
+    y_min = -datos.hz - (datos.profundidad_llave if datos.usar_llave else 0) - max(margen_y, 2.10)
     y_max = max(datos.H, datos.altura_relleno) + margen_y
 
     ax.set_xlim(-margen_x, datos.B + margen_x)
@@ -282,7 +337,7 @@ def dibujar_muro(ax, datos: DatosMuro, geometria: dict):
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
     ax.set_title("Geometría del muro de contención")
-    ax.legend(loc="upper right")
+    ax.legend(loc="upper right", fontsize=max(tamano_texto - 1, 7))
 
 
 def resumen_geometria(datos: DatosMuro) -> pd.DataFrame:
