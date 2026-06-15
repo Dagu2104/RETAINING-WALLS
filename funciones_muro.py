@@ -209,7 +209,7 @@ def dibujar_cotas_principales(ax, datos: DatosMuro, geometria: dict):
     ax.annotate(
         "",
         xy=(0, -datos.hz - 0.35),
-        xytext=(datos.B, -datos.hz - 0.55),
+        xytext=(datos.B, -datos.hz - 0.35),
         arrowprops=dict(arrowstyle="<->", linewidth=1.2)
     )
     ax.text(datos.B / 2, -datos.hz - 0.48, f"B = {datos.B:.2f} m", ha="center", va="top")
