@@ -204,8 +204,8 @@ def dibujar_cotas_principales(ax, datos: DatosMuro, geometria: dict | None = Non
     talon = calcular_talon(datos)
 
     # Cotas de puntera y talón.
-    y_cota_puntera_talon = -datos.hz - 0.18
-    y_texto_puntera_talon = -datos.hz - 0.26
+    y_cota_puntera_talon = -datos.hz - 0.97
+    y_texto_puntera_talon = -datos.hz - 1.1
 
     # Cota del ancho total B.
     # Para bajar más la flecha y el texto de B, aumenta estos valores: 1.35 y 1.48.
