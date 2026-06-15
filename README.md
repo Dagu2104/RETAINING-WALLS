@@ -17,44 +17,24 @@ Se usan unidades comunes en Ecuador:
 ## Archivos
 
 - `app.py`: interfaz principal de Streamlit.
-- `funciones_muro.py`: funciones separadas para validación, generación de geometría, dibujo, resumen, conversiones y memoria Word.
-- `requirements.txt`: librerías necesarias para ejecutar la app en local o en Streamlit Cloud.
+- `funciones_muro.py`: funciones separadas para validación, generación de geometría, dibujo, resumen y conversiones.
 - `README.md`: instrucciones de instalación y ejecución.
 
-## Instalación local
+## Instalación
 
 ```bash
-pip install -r requirements.txt
+pip install streamlit matplotlib pandas
 ```
 
-## Ejecución local
+## Ejecución
 
 ```bash
 streamlit run app.py
 ```
 
-## Uso en Streamlit Cloud
-
-Si subes el proyecto a GitHub y luego lo conectas con Streamlit Cloud, asegúrate de incluir el archivo:
-
-```text
-requirements.txt
-```
-
-Ese archivo instala automáticamente las librerías necesarias, incluyendo:
-
-- `streamlit`
-- `matplotlib`
-- `pandas`
-- `python-docx`
-
-El error `ModuleNotFoundError: matplotlib` aparece cuando Streamlit Cloud no encuentra `matplotlib` porque no estaba declarado en `requirements.txt`.
-
 ## Alcance actual
 
-Este primer módulo dibuja la geometría, organiza los datos de entrada y genera una memoria preliminar en Word.
-
-Luego se pueden agregar módulos para:
+Este primer módulo solo dibuja la geometría y organiza los datos de entrada. Luego se pueden agregar módulos para:
 
 - coeficiente activo Ka;
 - empuje activo Pa;
@@ -66,5 +46,22 @@ Luego se pueden agregar módulos para:
 - diseño a cortante;
 - diseño de puntera y talón;
 - diseño de llave de corte;
-- cuantías mínimas y detallado de acero;
-- memoria de cálculo completa en Word con procedimiento paso a paso.
+- cuantías mínimas y detallado de acero.
+```
+
+
+## Ajuste del tamaño del dibujo
+
+En la barra lateral de la aplicación se agregó la sección:
+
+```text
+Visualización del dibujo
+```
+
+Desde ahí se puede modificar:
+
+- `Ancho del dibujo en pantalla [px]`
+- `Alto relativo de la figura`
+- `Tamaño de texto de cotas`
+
+Esto evita que el gráfico se vea demasiado grande en Streamlit Cloud y reduce la sobreposición de los textos inferiores de puntera, talón y ancho total de zapata.
