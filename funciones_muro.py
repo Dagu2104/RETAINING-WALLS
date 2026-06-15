@@ -209,8 +209,8 @@ def dibujar_cotas_principales(ax, datos: DatosMuro, geometria: dict | None = Non
 
     # Cota del ancho total B.
     # Para bajar más la flecha y el texto de B, aumenta estos valores: 1.35 y 1.48.
-    y_cota_total = -datos.hz - 0.8
-    y_texto_total = -datos.hz - 0.93
+    y_cota_total = -datos.hz - 0.93
+    y_texto_total = -datos.hz - 1.1
 
     # Cota vertical de altura del fuste H.
     ax.annotate(
