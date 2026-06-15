@@ -1,5 +1,6 @@
 import streamlit as st
 import matplotlib.pyplot as plt
+from io import BytesIO
 
 from funciones_muro import (
     DatosMuro,
@@ -136,6 +137,36 @@ pos_llave = st.sidebar.number_input(
     step=0.05,
     disabled=not usar_llave,
     help="Distancia horizontal desde el borde frontal de la zapata hasta el eje de la llave."
+)
+
+
+st.sidebar.header("Visualización del dibujo")
+
+ancho_dibujo_px = st.sidebar.slider(
+    "Ancho del dibujo en pantalla [px]",
+    min_value=450,
+    max_value=950,
+    value=650,
+    step=50,
+    help="Reduce este valor si la imagen aparece demasiado grande."
+)
+
+alto_figura = st.sidebar.slider(
+    "Alto relativo de la figura",
+    min_value=4.0,
+    max_value=7.0,
+    value=5.0,
+    step=0.5,
+    help="Controla la altura del lienzo de Matplotlib."
+)
+
+tamano_texto_cotas = st.sidebar.slider(
+    "Tamaño de texto de cotas",
+    min_value=7,
+    max_value=12,
+    value=8,
+    step=1,
+    help="Reduce este valor si los textos de cotas se sobreponen."
 )
 
 datos = DatosMuro(

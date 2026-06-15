@@ -99,3 +99,20 @@ Luego se pueden agregar módulos para:
 - diseño de llave de corte;
 - cuantías mínimas y detallado de acero;
 - memoria de cálculo completa en Word con procedimiento paso a paso.
+
+
+## Corrección de NameError
+
+Si aparece un error relacionado con `tamano_texto_cotas`, significa que `app.py` está llamando a esa variable pero no existía el control en la barra lateral.
+
+Esta versión ya incluye en `app.py`:
+
+```python
+tamano_texto_cotas = st.sidebar.slider(...)
+```
+
+y la llamada correcta:
+
+```python
+dibujar_muro(ax, datos, geometria, tamano_texto=tamano_texto_cotas)
+```
