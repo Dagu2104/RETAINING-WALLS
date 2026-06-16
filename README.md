@@ -396,3 +396,19 @@ El resumen incluye:
 - armado del dentellón.
 
 Si todo está correcto se muestra `DISEÑO CUMPLE`. Si alguna revisión falla se muestra `DISEÑO CON OBSERVACIONES`.
+
+
+## Corrección altura de relleno
+
+Se corrigió el comportamiento de `altura_relleno`.
+
+Antes, si el relleno tenía pendiente, la línea de terreno se dibujaba siempre desde la corona del muro (`H`), por lo que cambiar `altura_relleno` no se veía claramente en el gráfico.
+
+Ahora:
+
+- la línea del relleno parte desde la altura real ingresada por el usuario;
+- `calcular_y_terreno()` usa `altura_relleno` como elevación inicial;
+- el Trial Wedge usa esa altura real;
+- el diseño del fuste usa una altura activa de relleno para momentos y cortantes;
+- el peso de suelo sobre el talón se calcula con un trapecio real según la línea de terreno;
+- por tanto, al modificar la altura de relleno cambian PA, momentos, cortantes, presiones de contacto y armado.

@@ -161,21 +161,62 @@ def generar_puntos_muro(datos: DatosMuro) -> dict:
 def calcular_linea_relleno(datos: DatosMuro, geometria: dict) -> list[tuple[float, float]]:
     """
     Calcula la línea superior del relleno detrás del muro.
+
+    La línea ya no se fuerza a pasar por la corona. Parte desde la altura de
+    relleno ingresada por el usuario.
     """
     x_inicio = geometria["x_dorso_fuste_corona"]
-    y_inicio = datos.H
+    y_inicio = datos.altura_relleno
 
-    if datos.pendiente_v == 0:
-        x_fin = datos.B + max(datos.B * 0.60, 1.00)
-        y_fin = datos.altura_relleno
-    else:
-        pendiente = datos.pendiente_v / datos.pendiente_h
-        delta_y = max(datos.altura_relleno - y_inicio, 0.0)
-        delta_x = delta_y / pendiente if pendiente > 0 else 0.0
-        x_fin = x_inicio + max(delta_x, datos.B * 0.60)
-        y_fin = y_inicio + pendiente * (x_fin - x_inicio)
+    x_fin = datos.B + max(datos.B * 0.60, 1.00)
+    y_fin = calcular_y_terreno(datos, geometria, x_fin)
 
     return [(x_inicio, y_inicio), (x_fin, y_fin)]
+
+
+
+def altura_relleno_en_muro(datos: DatosMuro, geometria: dict) -> float:
+    """
+    Altura efectiva de relleno contra el fuste desde la base del muro.
+
+    Se limita entre 0 y H para el diseño local del fuste. Si el relleno está
+    por encima de la corona, la parte excedente debe tratarse como sobrecarga
+    o geometría de terreno superior; para esta app se limita la altura retenida
+    directa al alto del fuste.
+    """
+    return max(0.0, min(datos.altura_relleno, datos.H))
+
+
+def suelo_sobre_talon(datos: DatosMuro, geometria: dict) -> dict:
+    """
+    Calcula el área, peso y centroide aproximado del suelo sobre el talón.
+
+    Se usa un trapecio entre:
+    - x = puntera + t_base;
+    - x = B;
+    con alturas dadas por la línea real de terreno.
+    """
+    talon = calcular_talon(datos)
+    if talon <= 0:
+        return {"area_m2": 0.0, "W_ton_m": 0.0, "x_centroide_m": datos.B}
+
+    x1 = datos.puntera + datos.t_base
+    x2 = datos.B
+    h1 = max(calcular_y_terreno(datos, geometria, x1), 0.0)
+    h2 = max(calcular_y_terreno(datos, geometria, x2), 0.0)
+
+    area = talon * (h1 + h2) / 2.0
+    W = area * datos.gamma_suelo
+
+    # Centroide de una altura lineal h(x) sobre el intervalo [x1, x2].
+    if h1 + h2 > 0:
+        x_rel = talon * (h1 + 2.0 * h2) / (3.0 * (h1 + h2))
+        x_c = x1 + x_rel
+    else:
+        x_c = x1 + talon / 2.0
+
+    return {"area_m2": area, "W_ton_m": W, "x_centroide_m": x_c, "h_inicio_m": h1, "h_fin_m": h2}
+
 
 
 def dibujar_poligono(ax, puntos: list[tuple[float, float]], etiqueta: str):
@@ -718,19 +759,29 @@ def area_poligono(puntos: list[tuple[float, float]]) -> float:
 
 def calcular_y_terreno(datos: DatosMuro, geometria: dict, x: float) -> float:
     """
-    Calcula la elevación del terreno de relleno para una coordenada horizontal x.
+    Calcula la elevación del terreno de relleno para una coordenada x.
 
-    El terreno se modela como una línea recta que parte desde la coronación posterior
-    del fuste. Si pendiente_v = 0, el relleno es horizontal.
+    Corrección importante:
+    - antes la línea de relleno siempre partía desde la corona del muro (y = H);
+    - ahora parte desde la altura real ingresada `altura_relleno`.
+
+    Por tanto, si cambias la altura de relleno, cambia:
+    - el dibujo;
+    - la cuña Trial Wedge;
+    - PA;
+    - momentos y cortantes del fuste;
+    - presiones de contacto;
+    - diseño de zapata y dentellón.
     """
     x0 = geometria["x_dorso_fuste_corona"]
-    y0 = datos.H
+    y0 = datos.altura_relleno
 
     if datos.pendiente_v == 0:
-        return datos.altura_relleno
+        return y0
 
     pendiente = datos.pendiente_v / datos.pendiente_h
-    return y0 + pendiente * (x - x0)
+    return y0 + pendiente * max(x - x0, 0.0)
+
 
 
 def calcular_trial_wedge_activo(datos: DatosMuro, geometria: dict, numero_cunas: int = 180) -> tuple[pd.DataFrame, dict]:
@@ -761,6 +812,22 @@ def calcular_trial_wedge_activo(datos: DatosMuro, geometria: dict, numero_cunas:
     x_muro = datos.B
     y_base = -datos.hz
     y_superior = calcular_y_terreno(datos, geometria, x_muro)
+
+    # Si no existe relleno por encima de la base de la zapata, no hay cuña activa.
+    if y_superior <= y_base:
+        vacio = pd.DataFrame(columns=[
+            "alfa_grados", "P_ton_m", "W_ton_m", "area_m2", "x_inter_m", "y_inter_m"
+        ])
+        return vacio, {
+            "PA_ton_m": 0.0,
+            "alfa_critico_grados": 0.0,
+            "delta_grados": 0.0,
+            "peso_cuna_ton_m": 0.0,
+            "area_cuna_m2": 0.0,
+            "x_interseccion_m": None,
+            "y_interseccion_m": None,
+            "poligono_cuna": None,
+        }
 
     # Pendiente del relleno usada como dirección aproximada del empuje.
     beta = math.atan(datos.pendiente_v / datos.pendiente_h) if datos.pendiente_v > 0 else 0.0
@@ -1193,6 +1260,8 @@ def tabla_diseno_fuste(resultado: dict) -> pd.DataFrame:
         ("δ asumido", resultado["delta_grados"], "grados"),
         ("α crítico", resultado["alfa_critico_grados"], "grados"),
         ("q base", resultado["q_base_ton_m2"], "ton/m²"),
+        ("Altura activa de relleno", resultado.get("altura_activa_relleno_m", 0.0), "m"),
+        ("Brazo activo", resultado.get("brazo_activo_m", 0.0), "m"),
         ("Mu fuste", resultado["Mu_ton_m_m"], "ton·m/m"),
         ("Vu fuste", resultado["Vu_ton_m"], "ton/m"),
         ("Peralte efectivo d", resultado["d_cm"], "cm"),
@@ -1315,20 +1384,18 @@ def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 1
         x_dentellon = 0.0
 
     talon = calcular_talon(datos)
-    altura_suelo_talon = max(datos.altura_relleno, datos.H)
-    area_suelo_talon = talon * altura_suelo_talon
-    W_suelo_talon = area_suelo_talon * datos.gamma_suelo
-    x_suelo_talon = datos.puntera + datos.t_base + talon / 2.0
 
-    # Peso adicional aproximado por pendiente sobre el talón.
-    if datos.pendiente_v > 0:
-        pendiente = datos.pendiente_v / datos.pendiente_h
-        area_tri_pendiente = 0.5 * talon * (pendiente * talon)
-        W_pendiente = area_tri_pendiente * datos.gamma_suelo
-        x_pendiente = datos.puntera + datos.t_base + 2.0 * talon / 3.0
-    else:
-        W_pendiente = 0.0
-        x_pendiente = datos.puntera + datos.t_base + talon / 2.0
+    # Suelo real sobre el talón según altura_relleno y pendiente.
+    # Antes se usaba max(altura_relleno, H), lo cual hacía que bajar el relleno
+    # no redujera el peso ni los momentos estabilizantes.
+    suelo_talon = suelo_sobre_talon(datos, geometria)
+    area_suelo_talon = suelo_talon["area_m2"]
+    W_suelo_talon = suelo_talon["W_ton_m"]
+    x_suelo_talon = suelo_talon["x_centroide_m"]
+
+    # La pendiente ya está incorporada en el trapecio de suelo_sobre_talon.
+    W_pendiente = 0.0
+    x_pendiente = x_suelo_talon
 
     # Momento estabilizante por cargas verticales.
     M_est_zapata = W_zapata * x_zapata
@@ -1381,6 +1448,9 @@ def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 1
         "M_est_dentellon_ton_m_m": M_est_dentellon,
         "W_suelo_talon_ton_m": W_suelo_talon,
         "x_suelo_talon_m": x_suelo_talon,
+        "area_suelo_talon_m2": area_suelo_talon,
+        "h_suelo_talon_inicio_m": suelo_talon.get("h_inicio_m", 0.0),
+        "h_suelo_talon_fin_m": suelo_talon.get("h_fin_m", 0.0),
         "M_est_suelo_talon_ton_m_m": M_est_suelo_talon,
         "W_pendiente_ton_m": W_pendiente,
         "x_pendiente_m": x_pendiente,
