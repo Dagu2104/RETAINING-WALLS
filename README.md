@@ -297,3 +297,23 @@ Nuevo criterio:
   - estribos cerrados `Ø @ separación`;
   - verificación de cortante;
   - sin fallo automático por `ld` vertical.
+
+
+## Ajuste: dentellón pequeño sin armado independiente
+
+Se ajustó la app para que cuando el dentellón sea pequeño no diseñe ni muestre
+acero independiente del dentellón. En ese caso solo se considera como parte
+monolítica de la zapata para:
+
+- peso propio;
+- momentos estabilizantes;
+- resistencia pasiva;
+- deslizamiento.
+
+Solo cuando el dentellón supera el umbral de profundidad para ser tratado como
+viga corrida, la app muestra:
+
+- barras longitudinales;
+- estribos cerrados;
+- cortante;
+- acero longitudinal requerido/provisto.
