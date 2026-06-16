@@ -70,3 +70,21 @@ También genera:
 - tabla de todas las cuñas ensayadas.
 
 Esta primera implementación es estática, para suelo sin cohesión, por metro longitudinal de muro. La siguiente etapa puede ampliar el método para caso sísmico `PAE`.
+
+
+## Armado dinámico del fuste
+
+Se agregó la pestaña `Armado fuste`.
+
+El programa recalcula dinámicamente:
+
+- `PA` mediante Trial Wedge.
+- Presión triangular equivalente en la base.
+- Cortante factorizado del fuste.
+- Momento factorizado en la base del fuste.
+- Acero vertical principal requerido.
+- Acero horizontal de temperatura/retracción.
+- Separación sugerida para barras.
+- Esquema didáctico del armado.
+
+La demanda sigue el criterio mostrado en el PDF para el fuste: el empuje activo actúa a `H/3` desde la base del fuste y el momento máximo se calcula en la base.

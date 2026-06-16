@@ -15,6 +15,9 @@ from funciones_muro import (
     tabla_comparacion_pdf,
     tabla_fuerzas_pdf,
     generar_memoria_word,
+    calcular_diseno_fuste_dinamico,
+    tabla_diseno_fuste,
+    dibujar_armado_fuste,
 )
 
 st.set_page_config(
@@ -93,6 +96,31 @@ numero_cunas = st.sidebar.slider(
     step=10
 )
 
+
+st.sidebar.header("Diseño del armado")
+recubrimiento_cm = st.sidebar.number_input(
+    "Recubrimiento para diseño [cm]",
+    min_value=3.0,
+    value=7.5,
+    step=0.5
+)
+diametro_vertical_mm = st.sidebar.selectbox(
+    "Diámetro barra vertical principal [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
+    index=3
+)
+diametro_horizontal_mm = st.sidebar.selectbox(
+    "Diámetro barra horizontal [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25],
+    index=1
+)
+separacion_max_cm = st.sidebar.number_input(
+    "Separación máxima permitida [cm]",
+    min_value=10.0,
+    value=30.0,
+    step=2.5
+)
+
 datos = DatosMuro(
     H=H,
     B=B,
@@ -147,7 +175,7 @@ with col_der:
     if not errores:
         geometria = generar_puntos_muro(datos)
 
-        tab1, tab2, tab3 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste"])
 
         with tab1:
             fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
@@ -217,6 +245,40 @@ with col_der:
 
             with st.expander("Ver todas las cuñas ensayadas"):
                 st.dataframe(tabla_trial, use_container_width=True, hide_index=True)
+
+
+        with tab4:
+            resultado_fuste = calcular_diseno_fuste_dinamico(
+                datos,
+                numero_cunas=numero_cunas,
+                recubrimiento_cm=recubrimiento_cm,
+                diametro_vertical_mm=float(diametro_vertical_mm),
+                diametro_horizontal_mm=float(diametro_horizontal_mm),
+                separacion_max_cm=separacion_max_cm
+            )
+
+            col_f1, col_f2, col_f3 = st.columns(3)
+            col_f1.metric("Mu fuste", f"{resultado_fuste['Mu_ton_m_m']:.3f} ton·m/m")
+            col_f2.metric("As vertical req.", f"{resultado_fuste['As_vertical_req_cm2_m']:.2f} cm²/m")
+            col_f3.metric(
+                "Armado vertical",
+                f"Ø{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm"
+            )
+
+            st.dataframe(tabla_diseno_fuste(resultado_fuste), use_container_width=True, hide_index=True)
+
+            fig_arm, ax_arm = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+            dibujar_armado_fuste(ax_arm, datos, geometria, resultado_fuste, mostrar_ejes=mostrar_ejes)
+            buffer_arm = BytesIO()
+            fig_arm.savefig(buffer_arm, format="png", bbox_inches="tight")
+            buffer_arm.seek(0)
+            st.image(buffer_arm, width=760)
+            plt.close(fig_arm)
+
+            st.caption(
+                "El armado se recalcula dinámicamente con la geometría, propiedades del suelo, f'c, fy, "
+                "diámetros seleccionados y PA obtenido por Trial Wedge."
+            )
 
     else:
         st.warning("El dibujo se mostrará cuando la geometría sea válida.")

@@ -880,6 +880,270 @@ def generar_memoria_word(datos: DatosMuro, incluir_pdf: bool = True) -> bytes:
     return buffer.getvalue()
 
 
+
+
+def area_barra_cm2(diametro_mm: float) -> float:
+    """
+    Calcula el área de una barra circular de acero en cm².
+
+    El diámetro se ingresa en milímetros porque es la forma usual de especificar
+    barras en Ecuador. Internamente se convierte a centímetros.
+    """
+    diametro_cm = diametro_mm / 10.0
+    return math.pi * diametro_cm ** 2 / 4.0
+
+
+def resolver_as_flexion_rectangular(Mu_ton_m: float, b_cm: float, d_cm: float, fc_kg_cm2: float, fy_kg_cm2: float, phi_flexion: float = 0.90) -> float:
+    """
+    Calcula el acero requerido As para flexión de una sección rectangular por metro de muro.
+
+    Se resuelve la ecuación:
+    phi * As * fy * (d - a/2) >= Mu
+    con:
+    a = As * fy / (0.85 * f'c * b)
+
+    Unidades:
+    - Mu en ton·m por metro de muro
+    - b y d en cm
+    - f'c y fy en kg/cm²
+    - As resultante en cm²/m
+    """
+    Mu_kg_cm = Mu_ton_m * 100000.0
+
+    A = phi_flexion * fy_kg_cm2 ** 2 / (2.0 * 0.85 * fc_kg_cm2 * b_cm)
+    B = -phi_flexion * fy_kg_cm2 * d_cm
+    C = Mu_kg_cm
+
+    discriminante = B ** 2 - 4.0 * A * C
+
+    if discriminante < 0:
+        return float("nan")
+
+    raiz1 = (-B - math.sqrt(discriminante)) / (2.0 * A)
+    raiz2 = (-B + math.sqrt(discriminante)) / (2.0 * A)
+
+    candidatos = [r for r in [raiz1, raiz2] if r > 0]
+    return min(candidatos) if candidatos else float("nan")
+
+
+def seleccionar_separacion(area_barra: float, As_req_cm2_m: float, separacion_max_cm: float = 30.0) -> tuple[float, float]:
+    """
+    Selecciona una separación práctica para barras de refuerzo.
+
+    La separación teórica se obtiene con:
+    s = Ab * 100 / As_req
+
+    Luego se redondea hacia abajo a separaciones comerciales para garantizar
+    que el acero provisto sea mayor o igual al requerido.
+    """
+    if As_req_cm2_m <= 0 or math.isnan(As_req_cm2_m):
+        return float("nan"), float("nan")
+
+    separacion_teorica = area_barra * 100.0 / As_req_cm2_m
+    separaciones_comerciales = [40, 35, 30, 25, 20, 18, 15, 12.5, 10, 7.5]
+
+    separaciones_validas = [s for s in separaciones_comerciales if s <= separacion_teorica and s <= separacion_max_cm]
+    if not separaciones_validas:
+        separacion = min(separaciones_comerciales)
+    else:
+        separacion = max(separaciones_validas)
+
+    As_prov = area_barra * 100.0 / separacion
+    return separacion, As_prov
+
+
+def calcular_diseno_fuste_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_vertical_mm: float = 16.0,
+    diametro_horizontal_mm: float = 12.0,
+    separacion_max_cm: float = 30.0
+) -> dict:
+    """
+    Diseña dinámicamente el armado preliminar del fuste.
+
+    La demanda se calcula con el procedimiento del PDF para el fuste:
+    - el empuje activo se obtiene mediante Trial Wedge;
+    - el empuje se aplica a H/3 desde la base del fuste;
+    - el momento factorizado se toma como gamma_p * PA * cos(delta) * H/3;
+    - el cortante factorizado se toma como gamma_p * PA * cos(delta).
+
+    Esta función recalcula todo cuando cambian geometría, suelo, altura, pendiente,
+    f'c o fy.
+    """
+    geometria = generar_puntos_muro(datos)
+    tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+    PA = resultado_trial["PA_ton_m"]
+    delta = math.radians(resultado_trial["delta_grados"])
+    H = datos.H
+    gamma_p = 1.50
+
+    q_base_ton_m2 = 2.0 * PA / H if H > 0 else 0.0
+    Pu_horizontal = PA * math.cos(delta)
+
+    Mu_ton_m = gamma_p * Pu_horizontal * H / 3.0
+    Vu_ton = gamma_p * Pu_horizontal
+
+    b_cm = 100.0
+    h_cm = datos.t_base * 100.0
+    diametro_vertical_cm = diametro_vertical_mm / 10.0
+    d_cm = h_cm - recubrimiento_cm - diametro_vertical_cm / 2.0
+
+    As_flexion = resolver_as_flexion_rectangular(
+        Mu_ton_m=Mu_ton_m,
+        b_cm=b_cm,
+        d_cm=d_cm,
+        fc_kg_cm2=datos.fc,
+        fy_kg_cm2=datos.fy,
+        phi_flexion=0.90
+    )
+
+    # Criterio del PDF para temperatura y retracción: As = 0.0018*b*h total.
+    # Para una cara se usa la mitad.
+    As_temp_total = 0.0018 * b_cm * h_cm
+    As_temp_cara = As_temp_total / 2.0
+
+    As_vertical_req = max(As_flexion, As_temp_cara)
+
+    Ab_vertical = area_barra_cm2(diametro_vertical_mm)
+    sep_vertical_cm, As_vertical_prov = seleccionar_separacion(
+        area_barra=Ab_vertical,
+        As_req_cm2_m=As_vertical_req,
+        separacion_max_cm=separacion_max_cm
+    )
+
+    Ab_horizontal = area_barra_cm2(diametro_horizontal_mm)
+    As_horizontal_req = As_temp_cara
+    sep_horizontal_cm, As_horizontal_prov = seleccionar_separacion(
+        area_barra=Ab_horizontal,
+        As_req_cm2_m=As_horizontal_req,
+        separacion_max_cm=separacion_max_cm
+    )
+
+    # Chequeo preliminar de cortante de concreto, en unidades kgf.
+    # Vc = 0.53*sqrt(fc)*b*d, por metro de muro. Se deja como chequeo preliminar.
+    phi_cortante = 0.75
+    Vc_kgf = 0.53 * math.sqrt(datos.fc) * b_cm * d_cm
+    phi_Vc_ton = phi_cortante * Vc_kgf / 1000.0
+
+    estado_cortante = "OK" if Vu_ton <= phi_Vc_ton else "Revisar cortante/refuerzo transversal"
+
+    return {
+        "PA_ton_m": PA,
+        "delta_grados": resultado_trial["delta_grados"],
+        "alfa_critico_grados": resultado_trial["alfa_grados"],
+        "q_base_ton_m2": q_base_ton_m2,
+        "Mu_ton_m_m": Mu_ton_m,
+        "Vu_ton_m": Vu_ton,
+        "b_cm": b_cm,
+        "h_cm": h_cm,
+        "d_cm": d_cm,
+        "As_flexion_cm2_m": As_flexion,
+        "As_temp_total_cm2_m": As_temp_total,
+        "As_temp_cara_cm2_m": As_temp_cara,
+        "As_vertical_req_cm2_m": As_vertical_req,
+        "diametro_vertical_mm": diametro_vertical_mm,
+        "separacion_vertical_cm": sep_vertical_cm,
+        "As_vertical_prov_cm2_m": As_vertical_prov,
+        "diametro_horizontal_mm": diametro_horizontal_mm,
+        "As_horizontal_req_cm2_m": As_horizontal_req,
+        "separacion_horizontal_cm": sep_horizontal_cm,
+        "As_horizontal_prov_cm2_m": As_horizontal_prov,
+        "phi_Vc_ton_m": phi_Vc_ton,
+        "estado_cortante": estado_cortante,
+        "tabla_trial": tabla_trial,
+        "resultado_trial": resultado_trial,
+    }
+
+
+def tabla_diseno_fuste(resultado: dict) -> pd.DataFrame:
+    """
+    Convierte el resultado del diseño del fuste en una tabla para mostrar en Streamlit.
+    """
+    filas = [
+        ("PA dinámico", resultado["PA_ton_m"], "ton/m"),
+        ("δ asumido", resultado["delta_grados"], "grados"),
+        ("α crítico", resultado["alfa_critico_grados"], "grados"),
+        ("q base", resultado["q_base_ton_m2"], "ton/m²"),
+        ("Mu fuste", resultado["Mu_ton_m_m"], "ton·m/m"),
+        ("Vu fuste", resultado["Vu_ton_m"], "ton/m"),
+        ("Peralte efectivo d", resultado["d_cm"], "cm"),
+        ("As por flexión", resultado["As_flexion_cm2_m"], "cm²/m"),
+        ("As temperatura por cara", resultado["As_temp_cara_cm2_m"], "cm²/m"),
+        ("As vertical requerido", resultado["As_vertical_req_cm2_m"], "cm²/m"),
+        ("As vertical provisto", resultado["As_vertical_prov_cm2_m"], "cm²/m"),
+        ("Separación vertical", resultado["separacion_vertical_cm"], "cm"),
+        ("As horizontal requerido", resultado["As_horizontal_req_cm2_m"], "cm²/m"),
+        ("As horizontal provisto", resultado["As_horizontal_prov_cm2_m"], "cm²/m"),
+        ("Separación horizontal", resultado["separacion_horizontal_cm"], "cm"),
+        ("φVc preliminar", resultado["phi_Vc_ton_m"], "ton/m"),
+        ("Estado cortante", resultado["estado_cortante"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Parámetro", "Valor", "Unidad"])
+
+
+def dibujar_armado_fuste(ax, datos: DatosMuro, geometria: dict, resultado: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja un esquema didáctico del armado del fuste.
+
+    Se muestra:
+    - acero vertical principal en la cara posterior del fuste;
+    - acero horizontal por temperatura/retracción;
+    - etiquetas con diámetros y separaciones calculadas.
+    """
+    dibujar_muro(
+        ax,
+        datos,
+        geometria,
+        tamano_texto=8,
+        mostrar_cotas=False,
+        mostrar_ejes=mostrar_ejes
+    )
+
+    x_back_base = geometria["x_dorso_fuste_base"]
+    x_back_top = geometria["x_dorso_fuste_corona"]
+    x_bar = x_back_base - 0.08
+
+    # Barras verticales principales en cara de relleno.
+    n_barras = 6
+    for i in range(n_barras):
+        t = i / max(n_barras - 1, 1)
+        y1 = 0.15 + t * (datos.H - 0.30)
+        y2 = min(y1 + datos.H / 5.0, datos.H - 0.05)
+        ax.plot([x_bar, x_bar], [y1, y2], linewidth=2.0)
+
+    # Barras horizontales esquemáticas.
+    x1 = geometria["x_frente_fuste"] + 0.05
+    x2 = geometria["x_dorso_fuste_base"] - 0.05
+    niveles = [datos.H * 0.25, datos.H * 0.45, datos.H * 0.65, datos.H * 0.85]
+    for y in niveles:
+        ax.plot([x1, x2], [y, y], linewidth=1.5, linestyle="--")
+
+    txt_vertical = f"Vertical principal: Ø{resultado['diametro_vertical_mm']:.0f} @ {resultado['separacion_vertical_cm']:.1f} cm"
+    txt_horizontal = f"Horizontal temp.: Ø{resultado['diametro_horizontal_mm']:.0f} @ {resultado['separacion_horizontal_cm']:.1f} cm"
+
+    ax.text(
+        datos.B * 0.50,
+        datos.H * 0.62,
+        txt_vertical,
+        fontsize=9,
+        ha="center",
+        va="center"
+    )
+    ax.text(
+        datos.B * 0.50,
+        datos.H * 0.52,
+        txt_horizontal,
+        fontsize=9,
+        ha="center",
+        va="center"
+    )
+
+    ax.set_title("Armado preliminar dinámico del fuste")
+
+
 # Lista explícita de nombres que app.py puede importar desde este módulo.
 __all__ = [
     "DatosMuro",
@@ -894,6 +1158,9 @@ __all__ = [
     "tabla_comparacion_pdf",
     "tabla_fuerzas_pdf",
     "generar_memoria_word",
+    "calcular_diseno_fuste_dinamico",
+    "tabla_diseno_fuste",
+    "dibujar_armado_fuste",
     "resumen_geometria",
     "convertir_resistencias_a_sistema_interno",
 ]
