@@ -327,7 +327,10 @@ with col_der:
                 "La posición del dentellón entra en el cálculo mediante su brazo x. "
                 "Al moverlo, cambia M = W·x y se recalculan x, e, qmax y qmin."
             )
-            st.dataframe(fm.tabla_momentos_estabilidad(presiones), use_container_width=True, hide_index=True)
+            if hasattr(fm, "tabla_momentos_estabilidad"):
+                st.dataframe(fm.tabla_momentos_estabilidad(presiones), use_container_width=True, hide_index=True)
+            else:
+                st.warning("Actualiza funciones_muro.py: falta tabla_momentos_estabilidad().")
 
             fig_q, ax_q = plt.subplots(figsize=(8.2, 5.6), dpi=130)
             fm.dibujar_presiones_contacto(ax_q, datos, geometria, presiones, mostrar_ejes=mostrar_ejes)
@@ -390,7 +393,10 @@ with col_der:
             st.dataframe(fm.tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
 
             st.subheader("4. Efecto de la ubicación del dentellón en momentos")
-            st.dataframe(fm.tabla_momentos_estabilidad(resultado_llave["presiones"]), use_container_width=True, hide_index=True)
+            if hasattr(fm, "tabla_momentos_estabilidad"):
+                st.dataframe(fm.tabla_momentos_estabilidad(resultado_llave["presiones"]), use_container_width=True, hide_index=True)
+            else:
+                st.warning("Actualiza funciones_muro.py: falta tabla_momentos_estabilidad().")
 
             fig_l, ax_l = plt.subplots(figsize=(8.2, 5.6), dpi=130)
             fm.dibujar_deslizamiento_pasivo_llave(ax_l, datos, geometria, resultado_llave, mostrar_ejes=mostrar_ejes)

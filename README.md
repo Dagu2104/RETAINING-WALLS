@@ -257,3 +257,16 @@ Por tanto, al mover el dentellón se recalculan:
 
 También se agregó una tabla específica de `Momentos estabilizantes y desestabilizantes`
 dentro de las pestañas de zapata y dentellón.
+
+
+## Corrección AttributeError tabla_momentos_estabilidad
+
+Se corrigió el error:
+
+```text
+AttributeError: module 'funciones_muro' has no attribute 'tabla_momentos_estabilidad'
+```
+
+La función ahora está garantizada dentro de `funciones_muro.py` y `app.py` verifica
+su existencia antes de llamarla. Además, la tabla funciona aunque el dentellón esté
+desactivado, usando momento cero para ese componente.
