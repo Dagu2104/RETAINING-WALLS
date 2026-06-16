@@ -39,7 +39,7 @@ def calcular_fuste_app(
 
     firma = inspect.signature(fm.calcular_diseno_fuste_dinamico)
     kwargs_filtrados = {k: v for k, v in kwargs.items() if k in firma.parameters}
-    resultado = calcular_fuste_app(**kwargs_filtrados)
+    resultado = fm.calcular_diseno_fuste_dinamico(**kwargs_filtrados)
 
     # Alias para que la app no falle aunque una función antigua no devuelva
     # todavía las claves por cara.

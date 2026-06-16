@@ -587,3 +587,24 @@ Corrección aplicada:
 - La función final del fuste también acepta `**kwargs` como protección adicional.
 
 Recomendación: subir los 4 archivos juntos y ejecutar `Manage app → Reboot app`.
+
+
+## Corrección RecursionError
+
+Se corrigió el `RecursionError` causado por el wrapper `calcular_fuste_app`.
+
+Causa: el reemplazo automático cambió accidentalmente la llamada interna del wrapper y quedó así:
+
+```python
+resultado = calcular_fuste_app(**kwargs_filtrados)
+```
+
+Eso hacía que la función se llamara a sí misma indefinidamente.
+
+Corrección:
+
+```python
+resultado = fm.calcular_diseno_fuste_dinamico(**kwargs_filtrados)
+```
+
+Con esto el wrapper vuelve a llamar correctamente a la función del módulo `funciones_muro.py`.
