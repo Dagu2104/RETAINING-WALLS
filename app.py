@@ -163,7 +163,7 @@ with col_izq:
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-    with st.expander("Verificación con ejemplo del PDF"):
+    with st.expander("Verificación dinámica con ejemplo del PDF"):
         resultados_pdf = fm.calcular_verificacion_caltrans_pdf()
         st.write("Se calculan los estados límite del ejemplo Caltrans usando los valores del PDF.")
         st.dataframe(fm.tabla_comparacion_pdf(resultados_pdf), use_container_width=True, hide_index=True)

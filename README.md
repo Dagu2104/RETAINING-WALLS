@@ -194,3 +194,38 @@ Subir siempre juntos:
 - `requirements.txt`
 
 Luego hacer `Manage app → Reboot app`.
+
+
+## Motor dinámico de validación PDF
+
+Se cambió la validación del ejemplo PDF para que no dependa de resultados finales
+quemados.
+
+Ahora el flujo es:
+
+1. `crear_caso_pdf_caltrans()`
+   - Define los insumos del ejemplo:
+     - partes del muro;
+     - pesos;
+     - brazos;
+     - PA, PAE y δ obtenidos en el PDF por Trial Wedge;
+     - factores de carga;
+     - resistencias de apoyo.
+
+2. `calcular_estabilidad_externa_desde_caso(caso)`
+   - Calcula dinámicamente:
+     - resultante vertical;
+     - momentos;
+     - x;
+     - e;
+     - B';
+     - q;
+     - resistencia de apoyo;
+     - resistencia a deslizamiento.
+
+3. `tabla_comparacion_pdf()`
+   - Compara los resultados dinámicos calculados contra los resultados publicados
+     en el PDF.
+
+Así, el programa ya no fuerza `x`, `e`, `B'`, `q` ni `R` para que cuadren con el PDF;
+los calcula a partir de los insumos del caso.

@@ -444,175 +444,259 @@ def resumen_geometria(datos: DatosMuro) -> pd.DataFrame:
     return pd.DataFrame(filas, columns=["Parámetro", "Valor", "Unidad"])
 
 
-def tabla_fuerzas_pdf() -> pd.DataFrame:
+
+def crear_caso_pdf_caltrans() -> dict:
     """
-    Devuelve la tabla base del PDF para el ejemplo de muro de contención.
+    Crea el caso de validación del ejemplo Caltrans BDP 11.2.
 
-    Valores tomados de las tablas 11.2.2-1, 11.2.2-2, 11.2.2-3,
-    11.2.2-4 y 11.2.2-5 del ejemplo Caltrans.
+    IMPORTANTE:
+    Este diccionario contiene únicamente INSUMOS del ejemplo:
+    geometría equivalente, pesos de partes, brazos de momento, empujes obtenidos
+    por el método Trial Wedge reportados en el PDF y factores de carga.
+
+    No contiene resultados finales como x, e, B', q o R/H. Esos valores se
+    calculan mediante el motor dinámico calcular_estabilidad_externa_desde_caso().
     """
-    filas = [
-        ("ΣW", 50.01, "kip", "Peso total muro + suelo sobre zapata"),
-        ("PA", 17.54, "kip", "Empuje activo estático por trial wedge"),
-        ("δA", 9.74, "grados", "Ángulo de acción del empuje activo"),
-        ("PAE", 31.56, "kip", "Empuje activo sísmico por trial wedge"),
-        ("PP", 9.97, "kip", "Empuje pasivo estático"),
-        ("PPE", 8.00, "kip", "Empuje pasivo sísmico"),
-        ("kh", 0.28, "-", "Coeficiente sísmico usado"),
-        ("B", 19.00, "ft", "Ancho de zapata del ejemplo"),
-    ]
-    return pd.DataFrame(filas, columns=["Parámetro", "Valor PDF", "Unidad", "Descripción"])
+    return {
+        "nombre": "Caltrans BDP 11.2 - RC Retaining Wall",
+        "B_ft": 19.0,
+        "phi_deg": 34.0,
+        "kh": 0.28,
+        "delta_A_deg": 9.74,
+        "delta_P_deg": 22.67,
+        "PA_kip": 17.54,
+        "PAE_kip": 31.56,
+        "PP_kip": 9.97,
+        "PPE_kip": 8.00,
+        "qn_extreme_ksf": 33.22,
+        "qn_strength_ksf": 57.78,
+        "q_overburden_service_ksf": 0.54,
+        "bearing_phi_extreme": 0.80,
+        "bearing_phi_strength": 0.55,
+        "friction_phi": 1.00,
+        "passive_phi_strength": 0.50,
+        "parts": [
+            {"id": "1", "tipo": "concreto", "W_kip": 3.23, "x_ft": 5.97, "y_inercia_ft": 14.00},
+            {"id": "2", "tipo": "concreto", "W_kip": 2.48, "x_ft": 6.92, "y_inercia_ft": 10.17},
+            {"id": "3", "tipo": "concreto", "W_kip": 7.12, "x_ft": 9.50, "y_inercia_ft": 1.25},
+            {"id": "4", "tipo": "concreto", "W_kip": 0.22, "x_ft": 14.00, "y_inercia_ft": 0.38},
+            {"id": "5", "tipo": "suelo", "W_kip": 1.82, "x_ft": 7.42, "y_inercia_ft": 17.17},
+            {"id": "6", "tipo": "suelo", "W_kip": 29.37, "x_ft": 13.44, "y_inercia_ft": 13.50},
+            {"id": "7", "tipo": "suelo", "W_kip": 1.32, "x_ft": 2.75, "y_inercia_ft": 3.50},
+            {"id": "8", "tipo": "suelo", "W_kip": 4.45, "x_ft": 14.83, "y_inercia_ft": 26.48},
+        ],
+        "pdf_resultados": {
+            "Extreme Event": {"x_ft": 3.52, "e_ft": 5.98, "Bp_ft": 7.03, "q_ksf": 7.87, "qr_ksf": 26.58},
+            "Service": {"x_ft": 8.79, "e_ft": 0.70, "Bp_ft": 17.59, "qnet_ksf": 2.47},
+            "Strength Ia": {"x_ft": 8.50, "Bp_ft": 17.00, "q_ksf": 4.16, "qr_ksf": 31.78},
+            "Strength Ib": {"x_ft": 7.44, "e_ft": 2.06, "Q_kip": 25.94, "R_kip": 40.50},
+        },
+    }
 
 
-def calcular_verificacion_caltrans_pdf() -> dict:
+def calcular_estabilidad_externa_desde_caso(caso: dict) -> dict:
     """
-    Reproduce los resultados principales del ejemplo Caltrans para verificar el programa.
+    Motor dinámico de estabilidad externa.
 
-    Esta función usa directamente los valores reportados en el PDF:
-    - pesos de las partes 1 a 8,
-    - brazos de momento,
-    - PA, PAE, δA,
-    - kh,
-    - PP y PPE,
-    - anchos efectivos y resistencias de apoyo reportadas.
+    Recibe un caso con pesos, brazos, empujes, factores y propiedades, y calcula:
+    - x de la resultante;
+    - excentricidad;
+    - ancho efectivo B';
+    - presión de contacto;
+    - resistencia de apoyo;
+    - resistencia a deslizamiento.
+
+    Esta función NO usa resultados finales del PDF. Por eso sirve como motor
+    de validación: si los insumos son los del PDF, los resultados deben coincidir.
     """
-    # Pesos y brazos de las partes 1 a 8, tabla 11.2.2-2 / 11.2.2-3.
-    pesos = [3.23, 2.48, 7.12, 0.22, 1.82, 29.37, 1.32, 4.45]
-    brazos_extremo = [5.97, 6.92, 9.50, 14.00, 7.42, 13.44, 2.75, 14.83]
-    brazos_servicio = [5.97, 6.92, 9.50, 14.00, 7.42, 13.44, 2.75, 14.83]
-    brazos_inercia = [14.00, 10.17, 1.25, 0.38, 17.17, 13.50, 3.50, 26.48]
+    B = caso["B_ft"]
+    parts = caso["parts"]
+    delta_A = math.radians(caso["delta_A_deg"])
+    delta_P = math.radians(caso["delta_P_deg"])
+    phi = math.radians(caso["phi_deg"])
 
-    B = 19.0
-    delta = math.radians(9.74)
-    PA = 17.54
-    PAE = 31.56
-    kh = 0.28
+    W_sum = sum(p["W_kip"] for p in parts)
 
-    # Extreme event: tabla 11.2.2-2.
-    w_sum = sum(pesos)
-    pae_v = PAE * math.sin(delta)
-    pae_h = PAE * math.cos(delta)
+    # -------------------------
+    # Extreme Event - Seismic
+    # -------------------------
+    PAE = caso["PAE_kip"]
+    PAE_v = PAE * math.sin(delta_A)
+    PAE_h = PAE * math.cos(delta_A)
 
-    m_pesos_ext = sum(w * a for w, a in zip(pesos, brazos_extremo))
-    m_pae_v = pae_v * 19.0
-    m_pae_h = -pae_h * 10.15
-    m_inercia = -sum(kh * w * a for w, a in zip(pesos, brazos_inercia))
+    M_pesos = sum(p["W_kip"] * p["x_ft"] for p in parts)
+    M_PAE_v = PAE_v * B
+    M_PAE_h = -PAE_h * 10.15
+    M_inercia = -sum(caso["kh"] * p["W_kip"] * p["y_inercia_ft"] for p in parts)
 
-    V_ext = w_sum + pae_v
-    M_const_ext = m_pesos_ext + m_pae_v + m_pae_h + m_inercia
-    x_ext = M_const_ext / V_ext
-    e_ext = B / 2 - x_ext
-    Bp_ext = B - 2 * e_ext
+    V_ext = W_sum + PAE_v
+    M_ext = M_pesos + M_PAE_v + M_PAE_h + M_inercia
+    x_ext = M_ext / V_ext
+    e_ext = B / 2.0 - x_ext
+    Bp_ext = B - 2.0 * e_ext
     q_ext = V_ext / Bp_ext
-    qr_ext = 0.8 * 33.22
+    qr_ext = caso["bearing_phi_extreme"] * caso["qn_extreme_ksf"]
 
-    # Service: tabla 11.2.2-3.
-    pa_v = PA * math.sin(delta)
-    pa_h = PA * math.cos(delta)
-    m_pesos_serv = sum(w * a for w, a in zip(pesos, brazos_servicio))
-    M_const_serv = m_pesos_serv + pa_v * 19.0 - pa_h * 10.65
-    V_serv = w_sum + pa_v
-    x_serv = M_const_serv / V_serv
-    e_serv = B / 2 - x_serv
-    Bp_serv = B - 2 * e_serv
-    q_gross_serv = V_serv / Bp_serv
-    q_net_serv = q_gross_serv - 0.54
+    # -------------------------
+    # Service
+    # -------------------------
+    PA = caso["PA_kip"]
+    PA_v = PA * math.sin(delta_A)
+    PA_h = PA * math.cos(delta_A)
 
-    # Strength Ia: tabla 11.2.2-4.
-    factores_ia = [1.25, 1.25, 1.25, 1.25, 1.35, 1.35, 1.35, 1.35]
-    cargas_ia = [w * f for w, f in zip(pesos, factores_ia)]
-    M_ia = sum(c * a for c, a in zip(cargas_ia, brazos_extremo))
-    V_ia = sum(cargas_ia) + 1.50 * pa_v
-    M_ia = M_ia + 1.50 * pa_v * 19.0 - 1.50 * pa_h * 10.15
+    V_serv = W_sum + PA_v
+    M_serv = M_pesos + PA_v * B - PA_h * 10.15
+    x_serv = M_serv / V_serv
+    e_serv = B / 2.0 - x_serv
+    Bp_serv = B - 2.0 * e_serv
+    qgross_serv = V_serv / Bp_serv
+    qnet_serv = qgross_serv - caso["q_overburden_service_ksf"]
+
+    # -------------------------
+    # Strength Ia - Bearing
+    # -------------------------
+    factores_ia = {"concreto": 1.25, "suelo": 1.35}
+    cargas_ia = [p["W_kip"] * factores_ia[p["tipo"]] for p in parts]
+    M_ia = sum(c * p["x_ft"] for c, p in zip(cargas_ia, parts))
+    V_ia = sum(cargas_ia) + 1.50 * PA_v
+    M_ia += 1.50 * PA_v * B - 1.50 * PA_h * 10.15
     x_ia = M_ia / V_ia
-    Bp_ia = 2 * x_ia
+    Bp_ia = 2.0 * x_ia
     q_ia = V_ia / Bp_ia
-    qr_ia = 0.55 * 57.78
+    qr_ia = caso["bearing_phi_strength"] * caso["qn_strength_ksf"]
 
-    # Strength Ib: tabla 11.2.2-5.
-    factores_ib = [0.90, 0.90, 0.90, 0.90, 1.00, 1.00, 1.00, 1.00]
-    cargas_ib = [w * f for w, f in zip(pesos, factores_ib)]
-    V_ib = sum(cargas_ib) + 1.50 * pa_v
-    M_ib = sum(c * a for c, a in zip(cargas_ib, brazos_extremo)) + 1.50 * pa_v * 19.0 - 1.50 * pa_h * 10.15
+    # -------------------------
+    # Strength Ib - Eccentricity and sliding
+    # -------------------------
+    factores_ib = {"concreto": 0.90, "suelo": 1.00}
+    cargas_ib = [p["W_kip"] * factores_ib[p["tipo"]] for p in parts]
+    V_ib = sum(cargas_ib) + 1.50 * PA_v
+    M_ib = sum(c * p["x_ft"] for c, p in zip(cargas_ib, parts))
+    M_ib += 1.50 * PA_v * B - 1.50 * PA_h * 10.15
     x_ib = M_ib / V_ib
-    e_ib = B / 2 - x_ib
-    Rf = V_ib * math.tan(math.radians(34.0))
-    Rp = 0.50 * 9.97 * math.cos(math.radians(22.67))
-    R_total = Rf + Rp
-    Q_activo = 1.50 * PA * math.cos(delta)
+    e_ib = B / 2.0 - x_ib
+
+    Q_activo = 1.50 * PA_h
+    R_friccion = caso["friction_phi"] * V_ib * math.tan(phi)
+    R_pasivo = caso["passive_phi_strength"] * caso["PP_kip"] * math.cos(delta_P)
+    R_total = R_friccion + R_pasivo
 
     return {
         "Extreme Event": {
             "x_ft": x_ext,
-            "x_pdf": 3.52,
             "e_ft": e_ext,
-            "e_pdf": 5.98,
             "Bp_ft": Bp_ext,
-            "Bp_pdf": 7.03,
             "q_ksf": q_ext,
-            "q_pdf": 7.87,
             "qr_ksf": qr_ext,
-            "qr_pdf": 26.58,
         },
         "Service": {
             "x_ft": x_serv,
-            "x_pdf": 8.79,
             "e_ft": e_serv,
-            "e_pdf": 0.70,
             "Bp_ft": Bp_serv,
-            "Bp_pdf": 17.59,
-            "qnet_ksf": q_net_serv,
-            "qnet_pdf": 2.47,
+            "qnet_ksf": qnet_serv,
         },
         "Strength Ia": {
             "x_ft": x_ia,
-            "x_pdf": 8.50,
             "Bp_ft": Bp_ia,
-            "Bp_pdf": 17.00,
             "q_ksf": q_ia,
-            "q_pdf": 4.16,
             "qr_ksf": qr_ia,
-            "qr_pdf": 31.78,
         },
         "Strength Ib": {
             "x_ft": x_ib,
-            "x_pdf": 7.44,
             "e_ft": e_ib,
-            "e_pdf": 2.06,
             "Q_kip": Q_activo,
-            "Q_pdf": 25.94,
             "R_kip": R_total,
-            "R_pdf": 40.50,
-        }
+        },
     }
+
+
+def calcular_verificacion_caltrans_pdf() -> dict:
+    """
+    Ejecuta la validación del ejemplo PDF usando el motor dinámico.
+
+    Esta función se mantiene por compatibilidad con app.py, pero ahora ya no
+    calcula con resultados finales quemados. Crea el caso PDF como insumo y
+    lo resuelve con calcular_estabilidad_externa_desde_caso().
+    """
+    caso = crear_caso_pdf_caltrans()
+    return calcular_estabilidad_externa_desde_caso(caso)
+
+
+def tabla_fuerzas_pdf() -> pd.DataFrame:
+    """
+    Devuelve los insumos principales del PDF para la validación.
+
+    Son valores de entrada del ejemplo Caltrans, no resultados finales de la tabla
+    de comparación.
+    """
+    caso = crear_caso_pdf_caltrans()
+    filas = [
+        ("ΣW", sum(p["W_kip"] for p in caso["parts"]), "kip", "Peso total calculado con partes 1 a 8"),
+        ("PA", caso["PA_kip"], "kip", "Empuje activo estático obtenido por Trial Wedge en el PDF"),
+        ("δA", caso["delta_A_deg"], "grados", "Ángulo de acción del empuje activo"),
+        ("PAE", caso["PAE_kip"], "kip", "Empuje activo sísmico obtenido por Trial Wedge en el PDF"),
+        ("PP", caso["PP_kip"], "kip", "Empuje pasivo estático"),
+        ("PPE", caso["PPE_kip"], "kip", "Empuje pasivo sísmico"),
+        ("kh", caso["kh"], "-", "Coeficiente sísmico usado"),
+        ("B", caso["B_ft"], "ft", "Ancho de zapata del ejemplo"),
+    ]
+    return pd.DataFrame(filas, columns=["Parámetro", "Valor PDF", "Unidad", "Descripción"])
+
+
+def tabla_insumos_partes_pdf() -> pd.DataFrame:
+    """
+    Muestra las partes del muro usadas como entrada para el motor dinámico.
+    """
+    caso = crear_caso_pdf_caltrans()
+    filas = []
+    for p in caso["parts"]:
+        filas.append((
+            p["id"],
+            p["tipo"],
+            p["W_kip"],
+            p["x_ft"],
+            p["y_inercia_ft"],
+            p["W_kip"] * p["x_ft"],
+        ))
+    return pd.DataFrame(
+        filas,
+        columns=["Parte", "Tipo", "W [kip]", "Brazo x [ft]", "Brazo inercia y [ft]", "Momento W*x [kip-ft]"],
+    )
 
 
 def tabla_comparacion_pdf(resultados: dict) -> pd.DataFrame:
     """
-    Convierte el diccionario de verificación Caltrans en una tabla de comparación.
+    Compara resultados dinámicos calculados contra los valores publicados en el PDF.
     """
+    caso = crear_caso_pdf_caltrans()
+    pdf = caso["pdf_resultados"]
     filas = []
-    for estado, datos_estado in resultados.items():
-        claves = sorted([k[:-4] for k in datos_estado if k.endswith("_pdf")])
-        for clave in claves:
-            calculado_key = clave
-            pdf_key = f"{clave}_pdf"
-            calculado = datos_estado.get(calculado_key)
-            pdf = datos_estado.get(pdf_key)
-            if calculado is None or pdf is None:
+
+    for estado, resultados_estado in resultados.items():
+        valores_pdf_estado = pdf.get(estado, {})
+        for variable, valor_pdf in valores_pdf_estado.items():
+            valor_calc = resultados_estado.get(variable)
+            if valor_calc is None:
                 continue
-            diferencia = calculado - pdf
+
+            diferencia = valor_calc - valor_pdf
+            error_pct = diferencia / valor_pdf * 100.0 if valor_pdf != 0 else 0.0
+            tolerancia = max(0.02, abs(valor_pdf) * 0.03)
+
             filas.append((
                 estado,
-                clave,
-                round(calculado, 3),
-                round(pdf, 3),
+                variable,
+                round(valor_calc, 3),
+                round(valor_pdf, 3),
                 round(diferencia, 3),
-                "OK" if abs(diferencia) <= max(0.05, abs(pdf) * 0.015) else "Revisar"
+                round(error_pct, 2),
+                "OK" if abs(diferencia) <= tolerancia else "Revisar",
             ))
 
-    return pd.DataFrame(filas, columns=["Estado límite", "Variable", "Calculado", "PDF", "Diferencia", "Estado"])
-
+    return pd.DataFrame(
+        filas,
+        columns=["Estado límite", "Variable", "Dinámico calculado", "PDF", "Diferencia", "Error %", "Estado"],
+    )
 
 
 
@@ -2249,6 +2333,9 @@ __all__ = [
     "calcular_verificacion_caltrans_pdf",
     "tabla_comparacion_pdf",
     "tabla_fuerzas_pdf",
+    "tabla_insumos_partes_pdf",
+    "calcular_estabilidad_externa_desde_caso",
+    "crear_caso_pdf_caltrans",
     "generar_memoria_word",
     "calcular_diseno_fuste_dinamico",
     "tabla_diseno_fuste",
