@@ -106,3 +106,53 @@ El programa recalcula dinámicamente:
 - Esquema didáctico del armado de zapata.
 
 Este módulo es preliminar y debe depurarse con los siguientes pasos del PDF para llegar al detallado final completo.
+
+
+## Zapata con cortante y anclaje
+
+Se amplió la pestaña `Zapata`.
+
+Ahora incluye:
+- Presiones de contacto.
+- Flexión de puntera.
+- Flexión de talón.
+- Cortante crítico de puntera a distancia `d` desde la cara del fuste.
+- Cortante crítico de talón a distancia `d` desde la cara posterior del fuste.
+- Comparación `Vu` contra `φVc`.
+- Acero mínimo por temperatura/retracción.
+- Acero requerido y provisto.
+- Separación práctica.
+- Longitud de desarrollo preliminar.
+- Estado global de zapata: `OK` o `Revisar`.
+
+La siguiente etapa recomendada es programar la llave de corte y luego el resumen general de cumplimiento.
+
+
+## Llave de corte y deslizamiento
+
+Se agregó la pestaña `Llave y deslizamiento`.
+
+Incluye las tres partes solicitadas:
+
+1. **Deslizamiento**
+   - Empuje horizontal actuante.
+   - Resistencia por fricción basal.
+   - Resistencia total.
+   - Relación `R/H`.
+   - Estado `OK` o `No cumple`.
+
+2. **Resistencia pasiva**
+   - Cálculo dinámico de `Kp`.
+   - Resistencia pasiva frente a la zapata.
+   - Resistencia pasiva total con llave.
+   - Incremento de resistencia por la llave.
+
+3. **Detalle de armado de llave**
+   - Presión pasiva sobre llave.
+   - Momento y cortante de llave.
+   - Acero requerido.
+   - Acero provisto.
+   - Separación.
+   - Cortante `Vu` vs `φVc`.
+   - Longitud de desarrollo preliminar.
+   - Esquema didáctico.

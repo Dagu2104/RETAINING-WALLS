@@ -1480,6 +1480,563 @@ def dibujar_armado_zapata(ax, datos: DatosMuro, geometria: dict, resultado: dict
 
     ax.set_title("Armado preliminar dinámico de zapata")
 
+
+
+def longitud_desarrollo_basica_cm(diametro_mm: float, fy_kg_cm2: float, fc_kg_cm2: float, factor: float = 0.075) -> float:
+    """
+    Estima una longitud de desarrollo preliminar en cm.
+
+    Fórmula práctica preliminar:
+    ld = factor * fy * db / sqrt(f'c)
+
+    donde:
+    - db está en cm,
+    - fy y f'c en kg/cm².
+
+    Se usa como control constructivo inicial para verificar si las barras principales
+    tienen longitud disponible suficiente dentro de la zapata.
+    """
+    db_cm = diametro_mm / 10.0
+    if fc_kg_cm2 <= 0:
+        return float("nan")
+    return factor * fy_kg_cm2 * db_cm / math.sqrt(fc_kg_cm2)
+
+
+def verificar_cortante_rectangular(Vu_ton_m: float, b_cm: float, d_cm: float, fc_kg_cm2: float, phi_cortante: float = 0.75) -> dict:
+    """
+    Verifica el cortante unidireccional para una franja de 1 m de ancho.
+
+    Se usa una resistencia preliminar:
+    Vc = 0.53 * sqrt(f'c) * b * d
+
+    con Vc en kgf, b y d en cm, f'c en kg/cm².
+    """
+    Vc_kgf = 0.53 * math.sqrt(fc_kg_cm2) * b_cm * d_cm
+    phi_Vc_ton = phi_cortante * Vc_kgf / 1000.0
+
+    return {
+        "Vu_ton_m": Vu_ton_m,
+        "phi_Vc_ton_m": phi_Vc_ton,
+        "relacion": Vu_ton_m / phi_Vc_ton if phi_Vc_ton > 0 else float("nan"),
+        "estado": "OK" if Vu_ton_m <= phi_Vc_ton else "No cumple"
+    }
+
+
+def calcular_diseno_zapata_definitivo(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0
+) -> dict:
+    """
+    Amplía el diseño dinámico de zapata con verificaciones más completas.
+
+    Incluye:
+    - flexión de puntera;
+    - flexión de talón;
+    - cortante de puntera a la cara del fuste;
+    - cortante de talón a la cara posterior del fuste;
+    - acero mínimo por temperatura/retracción;
+    - separación práctica;
+    - longitud de desarrollo preliminar;
+    - estado global OK / Revisar.
+
+    Nota: sigue siendo un módulo de cálculo programable y editable. Para diseño
+    profesional final se debe contrastar con la norma local aplicable y el criterio
+    geotécnico del proyecto.
+    """
+    base_resultado = calcular_diseno_zapata_dinamico(
+        datos=datos,
+        numero_cunas=numero_cunas,
+        recubrimiento_cm=recubrimiento_cm,
+        diametro_puntera_mm=diametro_puntera_mm,
+        diametro_talon_mm=diametro_talon_mm,
+        separacion_max_cm=separacion_max_cm
+    )
+
+    presiones = base_resultado["presiones"]
+
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+    d_puntera_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_talon_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+
+    d_puntera_m = d_puntera_cm / 100.0
+    d_talon_m = d_talon_cm / 100.0
+
+    gamma_u = 1.50
+
+    # Cortante en puntera: sección crítica a d desde la cara del fuste hacia la puntera.
+    Lp_crit = max(datos.puntera - d_puntera_m, 0.0)
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    qcrit_p = presion_lineal_en_x(datos, presiones, Lp_crit)
+    q_prom_crit_p = (q0 + qcrit_p) / 2.0
+    Vu_puntera_crit = gamma_u * q_prom_crit_p * Lp_crit
+
+    cortante_puntera = verificar_cortante_rectangular(
+        Vu_ton_m=Vu_puntera_crit,
+        b_cm=b_cm,
+        d_cm=d_puntera_cm,
+        fc_kg_cm2=datos.fc
+    )
+
+    # Cortante en talón: sección crítica a d desde la cara posterior del fuste hacia el talón.
+    Lt = calcular_talon(datos)
+    Lt_crit = max(Lt - d_talon_m, 0.0)
+    x_inicio_talon_crit = datos.puntera + datos.t_base + d_talon_m
+    x_fin_talon = datos.B
+
+    q_tcrit = presion_lineal_en_x(datos, presiones, x_inicio_talon_crit)
+    q_tfin = presion_lineal_en_x(datos, presiones, x_fin_talon)
+    q_prom_tcrit = (q_tcrit + q_tfin) / 2.0
+
+    altura_suelo = max(datos.altura_relleno, datos.H)
+    w_suelo_talon = datos.gamma_suelo * altura_suelo
+    if datos.pendiente_v > 0:
+        w_suelo_talon += datos.gamma_suelo * (datos.pendiente_v / datos.pendiente_h) * Lt / 2.0
+
+    w_neto_talon_crit = max(w_suelo_talon - q_prom_tcrit, 0.0)
+    Vu_talon_crit = gamma_u * w_neto_talon_crit * Lt_crit
+
+    cortante_talon = verificar_cortante_rectangular(
+        Vu_ton_m=Vu_talon_crit,
+        b_cm=b_cm,
+        d_cm=d_talon_cm,
+        fc_kg_cm2=datos.fc
+    )
+
+    # Longitudes de desarrollo preliminares.
+    ld_puntera_cm = longitud_desarrollo_basica_cm(diametro_puntera_mm, datos.fy, datos.fc)
+    ld_talon_cm = longitud_desarrollo_basica_cm(diametro_talon_mm, datos.fy, datos.fc)
+
+    longitud_disponible_puntera_cm = max(datos.puntera * 100.0 - recubrimiento_cm, 0.0)
+    longitud_disponible_talon_cm = max(Lt * 100.0 - recubrimiento_cm, 0.0)
+
+    estado_ld_puntera = "OK" if longitud_disponible_puntera_cm >= ld_puntera_cm else "Revisar anclaje/gancho"
+    estado_ld_talon = "OK" if longitud_disponible_talon_cm >= ld_talon_cm else "Revisar anclaje/gancho"
+
+    estados = [
+        presiones["estado_q"],
+        cortante_puntera["estado"],
+        cortante_talon["estado"],
+        estado_ld_puntera,
+        estado_ld_talon
+    ]
+    estado_global = "OK" if all(e == "OK" for e in estados) else "Revisar"
+
+    base_resultado.update({
+        "d_puntera_cm": d_puntera_cm,
+        "d_talon_cm": d_talon_cm,
+        "Lp_crit_m": Lp_crit,
+        "Lt_crit_m": Lt_crit,
+        "Vu_puntera_crit_ton_m": Vu_puntera_crit,
+        "Vu_talon_crit_ton_m": Vu_talon_crit,
+        "cortante_puntera": cortante_puntera,
+        "cortante_talon": cortante_talon,
+        "ld_puntera_cm": ld_puntera_cm,
+        "ld_talon_cm": ld_talon_cm,
+        "longitud_disponible_puntera_cm": longitud_disponible_puntera_cm,
+        "longitud_disponible_talon_cm": longitud_disponible_talon_cm,
+        "estado_ld_puntera": estado_ld_puntera,
+        "estado_ld_talon": estado_ld_talon,
+        "estado_global_zapata": estado_global,
+    })
+
+    return base_resultado
+
+
+def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
+    """
+    Tabla ampliada del diseño de zapata con flexión, cortante y anclaje.
+    """
+    filas = [
+        ("Estado global zapata", resultado["estado_global_zapata"], "-"),
+
+        ("qmax", resultado["presiones"]["qmax_ton_m2"], "ton/m²"),
+        ("qmin", resultado["presiones"]["qmin_ton_m2"], "ton/m²"),
+        ("qa", resultado["presiones"]["q_adm_ton_m2"], "ton/m²"),
+        ("Estado presión admisible", resultado["presiones"]["estado_q"], "-"),
+
+        ("Mu puntera", resultado["Mu_puntera_ton_m_m"], "ton·m/m"),
+        ("As puntera requerido", resultado["As_puntera_req_cm2_m"], "cm²/m"),
+        ("As puntera provisto", resultado["As_puntera_prov_cm2_m"], "cm²/m"),
+        ("Armado puntera", f"Ø{resultado['diametro_puntera_mm']:.0f} @ {resultado['sep_puntera_cm']:.1f}", "mm @ cm"),
+
+        ("Mu talón", resultado["Mu_talon_ton_m_m"], "ton·m/m"),
+        ("As talón requerido", resultado["As_talon_req_cm2_m"], "cm²/m"),
+        ("As talón provisto", resultado["As_talon_prov_cm2_m"], "cm²/m"),
+        ("Armado talón", f"Ø{resultado['diametro_talon_mm']:.0f} @ {resultado['sep_talon_cm']:.1f}", "mm @ cm"),
+
+        ("Vu puntera crítico", resultado["Vu_puntera_crit_ton_m"], "ton/m"),
+        ("φVc puntera", resultado["cortante_puntera"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc puntera", resultado["cortante_puntera"]["relacion"], "-"),
+        ("Estado cortante puntera", resultado["cortante_puntera"]["estado"], "-"),
+
+        ("Vu talón crítico", resultado["Vu_talon_crit_ton_m"], "ton/m"),
+        ("φVc talón", resultado["cortante_talon"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc talón", resultado["cortante_talon"]["relacion"], "-"),
+        ("Estado cortante talón", resultado["cortante_talon"]["estado"], "-"),
+
+        ("ld puntera estimada", resultado["ld_puntera_cm"], "cm"),
+        ("Longitud disponible puntera", resultado["longitud_disponible_puntera_cm"], "cm"),
+        ("Estado anclaje puntera", resultado["estado_ld_puntera"], "-"),
+
+        ("ld talón estimada", resultado["ld_talon_cm"], "cm"),
+        ("Longitud disponible talón", resultado["longitud_disponible_talon_cm"], "cm"),
+        ("Estado anclaje talón", resultado["estado_ld_talon"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
+def dibujar_detalle_zapata_definitivo(ax, datos: DatosMuro, geometria: dict, resultado: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja un esquema más completo del armado y puntos de chequeo de cortante/anclaje.
+    """
+    dibujar_armado_zapata(ax, datos, geometria, resultado, mostrar_ejes=mostrar_ejes)
+
+    d_p = resultado["d_puntera_cm"] / 100.0
+    d_t = resultado["d_talon_cm"] / 100.0
+
+    # Sección crítica de cortante en puntera, a d de la cara del fuste.
+    x_cp = max(datos.puntera - d_p, 0.0)
+    ax.plot([x_cp, x_cp], [-datos.hz, 0], linewidth=1.6, linestyle=":")
+    ax.text(x_cp, -datos.hz - 0.15, "Vu puntera @ d", fontsize=8, ha="center", va="top")
+
+    # Sección crítica de cortante en talón, a d de la cara posterior del fuste.
+    x_ct = datos.puntera + datos.t_base + d_t
+    ax.plot([x_ct, x_ct], [-datos.hz, 0], linewidth=1.6, linestyle=":")
+    ax.text(x_ct, -datos.hz - 0.15, "Vu talón @ d", fontsize=8, ha="center", va="top")
+
+    # Longitud de desarrollo esquemática.
+    ax.annotate(
+        "",
+        xy=(0.08, -datos.hz + 0.18),
+        xytext=(min(datos.puntera, resultado["ld_puntera_cm"] / 100.0), -datos.hz + 0.18),
+        arrowprops=dict(arrowstyle="<->", linewidth=1.0)
+    )
+    ax.text(
+        min(datos.puntera / 2, resultado["ld_puntera_cm"] / 200.0),
+        -datos.hz + 0.28,
+        "ld puntera",
+        fontsize=8,
+        ha="center",
+        va="bottom"
+    )
+
+    x0 = datos.puntera + datos.t_base
+    x1 = min(datos.B - 0.08, x0 + resultado["ld_talon_cm"] / 100.0)
+    ax.annotate(
+        "",
+        xy=(x0, -0.18),
+        xytext=(x1, -0.18),
+        arrowprops=dict(arrowstyle="<->", linewidth=1.0)
+    )
+    ax.text((x0 + x1) / 2, -0.08, "ld talón", fontsize=8, ha="center", va="bottom")
+
+    ax.set_title("Detalle dinámico de zapata: flexión, cortante y anclaje")
+
+
+
+def coeficiente_pasivo_rankine(phi_grados: float) -> float:
+    """
+    Calcula el coeficiente pasivo Rankine:
+    Kp = tan²(45° + φ/2)
+
+    Se usa como aproximación dinámica para estimar la resistencia pasiva frente
+    a la zapata y llave de corte.
+    """
+    phi = math.radians(phi_grados)
+    return math.tan(math.radians(45.0) + phi / 2.0) ** 2
+
+
+def calcular_deslizamiento_y_llave(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_llave_mm: float = 12.0,
+    separacion_max_cm: float = 30.0,
+    factor_resistencia_friccion: float = 1.00,
+    factor_resistencia_pasiva: float = 0.50,
+    factor_carga_empuje: float = 1.50
+) -> dict:
+    """
+    Calcula dinámicamente las tres partes pedidas:
+
+    1. Deslizamiento:
+       compara el empuje horizontal actuante contra la resistencia por fricción
+       y la resistencia pasiva disponible.
+
+    2. Resistencia pasiva:
+       estima PP frente a la zapata y llave con Kp Rankine.
+
+    3. Detalle de armado de llave:
+       calcula momento, cortante y acero preliminar de la llave como elemento
+       en voladizo sometido a presión pasiva triangular.
+
+    La lógica sigue el esquema del PDF: la resistencia horizontal puede venir de
+    fricción en la base Rf y presión pasiva PP/PPE delante de la zapata/llave.
+    """
+    geometria = generar_puntos_muro(datos)
+    presiones = calcular_presiones_contacto_servicio(datos, numero_cunas=numero_cunas)
+
+    PA_h = presiones["PA_h_ton_m"]
+    V_total = presiones["V_total_ton_m"]
+
+    # Demanda horizontal factorizada.
+    H_actuante = factor_carga_empuje * PA_h
+
+    # Resistencia por fricción.
+    R_friccion_nominal = datos.mu * V_total
+    R_friccion_diseno = factor_resistencia_friccion * R_friccion_nominal
+
+    # Resistencia pasiva delante de la zapata y llave.
+    Kp = coeficiente_pasivo_rankine(datos.phi)
+
+    altura_pasiva_zapata = datos.hz
+    altura_pasiva_llave = datos.hz + (datos.profundidad_llave if datos.usar_llave else 0.0)
+
+    PP_zapata_nominal = 0.5 * Kp * datos.gamma_suelo * altura_pasiva_zapata ** 2
+    PP_total_nominal = 0.5 * Kp * datos.gamma_suelo * altura_pasiva_llave ** 2
+    PP_llave_extra_nominal = max(PP_total_nominal - PP_zapata_nominal, 0.0)
+
+    PP_diseno = factor_resistencia_pasiva * PP_total_nominal
+
+    R_total = R_friccion_diseno + PP_diseno
+    FS_deslizamiento = R_total / H_actuante if H_actuante > 0 else float("inf")
+    estado_deslizamiento = "OK" if R_total >= H_actuante else "No cumple"
+
+    # Diseño de la llave: presión pasiva triangular actuando sobre profundidad de llave.
+    if datos.usar_llave and datos.profundidad_llave > 0:
+        h_key = datos.profundidad_llave
+        p_base_llave = Kp * datos.gamma_suelo * h_key
+        P_llave = 0.5 * p_base_llave * h_key
+
+        # Factor de carga para demanda de diseño de la llave.
+        Vu_llave = factor_carga_empuje * P_llave
+        Mu_llave = factor_carga_empuje * P_llave * h_key / 3.0
+
+        b_cm = 100.0
+        h_cm = datos.ancho_llave * 100.0
+        d_cm = h_cm - recubrimiento_cm - (diametro_llave_mm / 10.0) / 2.0
+
+        As_llave_flexion = resolver_as_flexion_rectangular(
+            Mu_ton_m=Mu_llave,
+            b_cm=b_cm,
+            d_cm=d_cm,
+            fc_kg_cm2=datos.fc,
+            fy_kg_cm2=datos.fy
+        )
+
+        As_min_llave = 0.0018 * b_cm * h_cm / 2.0
+        As_llave_req = max(As_llave_flexion, As_min_llave)
+
+        sep_llave_cm, As_llave_prov = seleccionar_separacion(
+            area_barra=area_barra_cm2(diametro_llave_mm),
+            As_req_cm2_m=As_llave_req,
+            separacion_max_cm=separacion_max_cm
+        )
+
+        cortante_llave = verificar_cortante_rectangular(
+            Vu_ton_m=Vu_llave,
+            b_cm=b_cm,
+            d_cm=d_cm,
+            fc_kg_cm2=datos.fc
+        )
+
+        ld_llave_cm = longitud_desarrollo_basica_cm(diametro_llave_mm, datos.fy, datos.fc)
+        longitud_disponible_llave_cm = max(datos.profundidad_llave * 100.0 - recubrimiento_cm, 0.0)
+        estado_ld_llave = "OK" if longitud_disponible_llave_cm >= ld_llave_cm else "Revisar anclaje/gancho"
+
+        estado_armado_llave = "OK" if cortante_llave["estado"] == "OK" and estado_ld_llave == "OK" else "Revisar"
+    else:
+        h_key = 0.0
+        p_base_llave = 0.0
+        P_llave = 0.0
+        Vu_llave = 0.0
+        Mu_llave = 0.0
+        d_cm = 0.0
+        As_llave_flexion = 0.0
+        As_min_llave = 0.0
+        As_llave_req = 0.0
+        sep_llave_cm = 0.0
+        As_llave_prov = 0.0
+        cortante_llave = {"Vu_ton_m": 0.0, "phi_Vc_ton_m": 0.0, "relacion": 0.0, "estado": "No aplica"}
+        ld_llave_cm = 0.0
+        longitud_disponible_llave_cm = 0.0
+        estado_ld_llave = "No aplica"
+        estado_armado_llave = "No aplica"
+
+    estado_global = "OK" if estado_deslizamiento == "OK" and estado_armado_llave in ["OK", "No aplica"] else "Revisar"
+
+    return {
+        "PA_h_ton_m": PA_h,
+        "V_total_ton_m": V_total,
+        "H_actuante_ton_m": H_actuante,
+        "mu": datos.mu,
+        "R_friccion_nominal_ton_m": R_friccion_nominal,
+        "R_friccion_diseno_ton_m": R_friccion_diseno,
+        "Kp": Kp,
+        "altura_pasiva_zapata_m": altura_pasiva_zapata,
+        "altura_pasiva_total_m": altura_pasiva_llave,
+        "PP_zapata_nominal_ton_m": PP_zapata_nominal,
+        "PP_total_nominal_ton_m": PP_total_nominal,
+        "PP_llave_extra_nominal_ton_m": PP_llave_extra_nominal,
+        "PP_diseno_ton_m": PP_diseno,
+        "R_total_ton_m": R_total,
+        "FS_deslizamiento": FS_deslizamiento,
+        "estado_deslizamiento": estado_deslizamiento,
+        "h_key_m": h_key,
+        "p_base_llave_ton_m2": p_base_llave,
+        "P_llave_ton_m": P_llave,
+        "Vu_llave_ton_m": Vu_llave,
+        "Mu_llave_ton_m_m": Mu_llave,
+        "d_llave_cm": d_cm,
+        "As_llave_flexion_cm2_m": As_llave_flexion,
+        "As_min_llave_cm2_m": As_min_llave,
+        "As_llave_req_cm2_m": As_llave_req,
+        "diametro_llave_mm": diametro_llave_mm,
+        "sep_llave_cm": sep_llave_cm,
+        "As_llave_prov_cm2_m": As_llave_prov,
+        "cortante_llave": cortante_llave,
+        "ld_llave_cm": ld_llave_cm,
+        "longitud_disponible_llave_cm": longitud_disponible_llave_cm,
+        "estado_ld_llave": estado_ld_llave,
+        "estado_armado_llave": estado_armado_llave,
+        "estado_global": estado_global,
+        "presiones": presiones,
+    }
+
+
+def tabla_deslizamiento_llave(resultado: dict) -> pd.DataFrame:
+    """
+    Tabla resumen de deslizamiento, resistencia pasiva y armado de llave.
+    """
+    filas = [
+        ("Estado global", resultado["estado_global"], "-"),
+
+        ("1. DESLIZAMIENTO", "", ""),
+        ("Empuje horizontal PAh", resultado["PA_h_ton_m"], "ton/m"),
+        ("Empuje horizontal factorizado", resultado["H_actuante_ton_m"], "ton/m"),
+        ("Vertical total V", resultado["V_total_ton_m"], "ton/m"),
+        ("Coeficiente fricción μ", resultado["mu"], "-"),
+        ("Resistencia por fricción Rf", resultado["R_friccion_diseno_ton_m"], "ton/m"),
+        ("Resistencia total R", resultado["R_total_ton_m"], "ton/m"),
+        ("FS o relación R/H", resultado["FS_deslizamiento"], "-"),
+        ("Estado deslizamiento", resultado["estado_deslizamiento"], "-"),
+
+        ("2. RESISTENCIA PASIVA", "", ""),
+        ("Kp Rankine", resultado["Kp"], "-"),
+        ("Altura pasiva zapata", resultado["altura_pasiva_zapata_m"], "m"),
+        ("Altura pasiva total con llave", resultado["altura_pasiva_total_m"], "m"),
+        ("PP zapata nominal", resultado["PP_zapata_nominal_ton_m"], "ton/m"),
+        ("PP total nominal", resultado["PP_total_nominal_ton_m"], "ton/m"),
+        ("Incremento por llave", resultado["PP_llave_extra_nominal_ton_m"], "ton/m"),
+        ("PP de diseño", resultado["PP_diseno_ton_m"], "ton/m"),
+
+        ("3. DETALLE ARMADO LLAVE", "", ""),
+        ("Altura llave", resultado["h_key_m"], "m"),
+        ("Presión pasiva base llave", resultado["p_base_llave_ton_m2"], "ton/m²"),
+        ("Fuerza pasiva sobre llave", resultado["P_llave_ton_m"], "ton/m"),
+        ("Mu llave", resultado["Mu_llave_ton_m_m"], "ton·m/m"),
+        ("Vu llave", resultado["Vu_llave_ton_m"], "ton/m"),
+        ("d llave", resultado["d_llave_cm"], "cm"),
+        ("As flexión llave", resultado["As_llave_flexion_cm2_m"], "cm²/m"),
+        ("As mínimo llave", resultado["As_min_llave_cm2_m"], "cm²/m"),
+        ("As requerido llave", resultado["As_llave_req_cm2_m"], "cm²/m"),
+        ("As provisto llave", resultado["As_llave_prov_cm2_m"], "cm²/m"),
+        ("Armado llave", f"Ø{resultado['diametro_llave_mm']:.0f} @ {resultado['sep_llave_cm']:.1f}", "mm @ cm"),
+        ("φVc llave", resultado["cortante_llave"]["phi_Vc_ton_m"], "ton/m"),
+        ("Estado cortante llave", resultado["cortante_llave"]["estado"], "-"),
+        ("ld llave estimada", resultado["ld_llave_cm"], "cm"),
+        ("Longitud disponible llave", resultado["longitud_disponible_llave_cm"], "cm"),
+        ("Estado anclaje llave", resultado["estado_ld_llave"], "-"),
+        ("Estado armado llave", resultado["estado_armado_llave"], "-"),
+    ]
+
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
+def dibujar_deslizamiento_pasivo_llave(ax, datos: DatosMuro, geometria: dict, resultado: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja un esquema didáctico de:
+    - empuje horizontal actuante;
+    - resistencia por fricción;
+    - resistencia pasiva;
+    - llave de corte;
+    - armado principal de la llave.
+    """
+    dibujar_muro(ax, datos, geometria, tamano_texto=8, mostrar_cotas=False, mostrar_ejes=mostrar_ejes)
+
+    # Empuje activo horizontal.
+    y_emp = datos.H * 0.35
+    flecha(
+        ax,
+        (datos.B + 0.85, y_emp),
+        (datos.B + 0.10, y_emp),
+        "PAh",
+        dx=0.10,
+        dy=0.22
+    )
+
+    # Fricción basal.
+    y_base = -datos.hz - 0.08
+    flecha(
+        ax,
+        (datos.B * 0.35, y_base),
+        (datos.B * 0.78, y_base),
+        "Rf = μV",
+        dx=0.05,
+        dy=0.18
+    )
+
+    # Resistencia pasiva frontal.
+    flecha(
+        ax,
+        (-0.80, -datos.hz * 0.45),
+        (0.03, -datos.hz * 0.45),
+        "PP",
+        dx=-0.12,
+        dy=-0.22
+    )
+
+    if datos.usar_llave and "llave" in geometria:
+        x1 = datos.pos_llave - datos.ancho_llave / 2
+        x2 = datos.pos_llave + datos.ancho_llave / 2
+        xmid = (x1 + x2) / 2
+
+        # Presión pasiva en llave.
+        flecha(
+            ax,
+            (xmid - 0.85, -datos.hz - datos.profundidad_llave * 0.55),
+            (x1 + 0.02, -datos.hz - datos.profundidad_llave * 0.55),
+            "PP llave",
+            dx=-0.05,
+            dy=-0.22
+        )
+
+        # Barras esquemáticas verticales en llave.
+        n = 4
+        for i in range(n):
+            x = x1 + (i + 1) * (x2 - x1) / (n + 1)
+            ax.plot(
+                [x, x],
+                [-datos.hz - datos.profundidad_llave + 0.05, -datos.hz - 0.05],
+                linewidth=2.0
+            )
+
+        ax.text(
+            xmid,
+            -datos.hz - datos.profundidad_llave - 0.18,
+            f"Llave: Ø{resultado['diametro_llave_mm']:.0f} @ {resultado['sep_llave_cm']:.1f} cm",
+            fontsize=8,
+            ha="center",
+            va="top"
+        )
+
+    ax.set_title("Deslizamiento, resistencia pasiva y detalle de llave")
+
 # Lista explícita de nombres que app.py puede importar desde este módulo.
 __all__ = [
     "DatosMuro",
@@ -1503,6 +2060,15 @@ __all__ = [
     "tabla_diseno_zapata",
     "dibujar_presiones_contacto",
     "dibujar_armado_zapata",
+    "calcular_diseno_zapata_definitivo",
+    "tabla_diseno_zapata_definitivo",
+    "dibujar_detalle_zapata_definitivo",
+    "verificar_cortante_rectangular",
+    "longitud_desarrollo_basica_cm",
+    "calcular_deslizamiento_y_llave",
+    "tabla_deslizamiento_llave",
+    "dibujar_deslizamiento_pasivo_llave",
+    "coeficiente_pasivo_rankine",
     "resumen_geometria",
     "convertir_resistencias_a_sistema_interno",
 ]

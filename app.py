@@ -23,6 +23,12 @@ from funciones_muro import (
     tabla_diseno_zapata,
     dibujar_presiones_contacto,
     dibujar_armado_zapata,
+    calcular_diseno_zapata_definitivo,
+    tabla_diseno_zapata_definitivo,
+    dibujar_detalle_zapata_definitivo,
+    calcular_deslizamiento_y_llave,
+    tabla_deslizamiento_llave,
+    dibujar_deslizamiento_pasivo_llave,
 )
 
 st.set_page_config(
@@ -136,6 +142,11 @@ diametro_talon_mm = st.sidebar.selectbox(
     [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
     index=3
 )
+diametro_llave_mm = st.sidebar.selectbox(
+    "Diámetro barra llave [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25],
+    index=1
+)
 
 datos = DatosMuro(
     H=H,
@@ -191,7 +202,7 @@ with col_der:
     if not errores:
         geometria = generar_puntos_muro(datos)
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata", "Llave y deslizamiento"])
 
         with tab1:
             fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
@@ -298,7 +309,7 @@ with col_der:
 
 
         with tab5:
-            resultado_zapata = calcular_diseno_zapata_dinamico(
+            resultado_zapata = calcular_diseno_zapata_definitivo(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -309,12 +320,13 @@ with col_der:
 
             presiones = resultado_zapata["presiones"]
 
-            col_z1, col_z2, col_z3 = st.columns(3)
-            col_z1.metric("qmax", f"{presiones['qmax_ton_m2']:.2f} ton/m²")
-            col_z2.metric("Mu puntera", f"{resultado_zapata['Mu_puntera_ton_m_m']:.3f} ton·m/m")
-            col_z3.metric("Mu talón", f"{resultado_zapata['Mu_talon_ton_m_m']:.3f} ton·m/m")
+            col_z1, col_z2, col_z3, col_z4 = st.columns(4)
+            col_z1.metric("Estado zapata", resultado_zapata["estado_global_zapata"])
+            col_z2.metric("qmax", f"{presiones['qmax_ton_m2']:.2f} ton/m²")
+            col_z3.metric("Mu puntera", f"{resultado_zapata['Mu_puntera_ton_m_m']:.3f} ton·m/m")
+            col_z4.metric("Mu talón", f"{resultado_zapata['Mu_talon_ton_m_m']:.3f} ton·m/m")
 
-            st.subheader("Presiones de contacto")
+            st.subheader("1. Presiones de contacto")
             st.dataframe(tabla_presiones_contacto(presiones), use_container_width=True, hide_index=True)
 
             fig_q, ax_q = plt.subplots(figsize=(8.2, 5.6), dpi=130)
@@ -325,20 +337,69 @@ with col_der:
             st.image(buffer_q, width=760)
             plt.close(fig_q)
 
-            st.subheader("Diseño preliminar de puntera y talón")
-            st.dataframe(tabla_diseno_zapata(resultado_zapata), use_container_width=True, hide_index=True)
+            st.subheader("2. Diseño de puntera y talón")
+            st.dataframe(tabla_diseno_zapata_definitivo(resultado_zapata), use_container_width=True, hide_index=True)
 
             fig_z, ax_z = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_armado_zapata(ax_z, datos, geometria, resultado_zapata, mostrar_ejes=mostrar_ejes)
+            dibujar_detalle_zapata_definitivo(ax_z, datos, geometria, resultado_zapata, mostrar_ejes=mostrar_ejes)
             buffer_z = BytesIO()
             fig_z.savefig(buffer_z, format="png", bbox_inches="tight")
             buffer_z.seek(0)
             st.image(buffer_z, width=760)
             plt.close(fig_z)
 
-            st.caption(
-                "La zapata se recalcula dinámicamente con la resultante vertical, la excentricidad, "
-                "las presiones de contacto y los parámetros de materiales."
+            st.info(
+                "Esta pestaña ya incluye flexión, cortante a distancia d desde la cara del fuste, "
+                "acero mínimo, acero provisto y revisión preliminar de longitud de desarrollo."
+            )
+
+
+        with tab6:
+            resultado_llave = calcular_deslizamiento_y_llave(
+                datos,
+                numero_cunas=numero_cunas,
+                recubrimiento_cm=recubrimiento_cm,
+                diametro_llave_mm=float(diametro_llave_mm),
+                separacion_max_cm=separacion_max_cm
+            )
+
+            col_l1, col_l2, col_l3, col_l4 = st.columns(4)
+            col_l1.metric("Estado global", resultado_llave["estado_global"])
+            col_l2.metric("Deslizamiento", resultado_llave["estado_deslizamiento"])
+            col_l3.metric("R / H", f"{resultado_llave['FS_deslizamiento']:.2f}")
+            col_l4.metric("PP diseño", f"{resultado_llave['PP_diseno_ton_m']:.2f} ton/m")
+
+            st.subheader("1. Deslizamiento")
+            st.write(
+                "Se compara el empuje horizontal factorizado contra la resistencia por fricción "
+                "más la resistencia pasiva disponible."
+            )
+
+            st.subheader("2. Resistencia pasiva")
+            st.write(
+                "Se calcula la resistencia pasiva frente a la zapata y la llave. "
+                "La llave aumenta la altura pasiva disponible y por tanto incrementa PP."
+            )
+
+            st.subheader("3. Detalle de armado de la llave")
+            st.write(
+                "La llave se revisa como elemento en voladizo sometido a presión pasiva triangular. "
+                "Se calcula Mu, Vu, As requerido, As provisto, cortante y anclaje preliminar."
+            )
+
+            st.dataframe(tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
+
+            fig_l, ax_l = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+            dibujar_deslizamiento_pasivo_llave(ax_l, datos, geometria, resultado_llave, mostrar_ejes=mostrar_ejes)
+            buffer_l = BytesIO()
+            fig_l.savefig(buffer_l, format="png", bbox_inches="tight")
+            buffer_l.seek(0)
+            st.image(buffer_l, width=760)
+            plt.close(fig_l)
+
+            st.info(
+                "Este módulo es dinámico: si cambias φ, γs, μ, altura, zapata, llave o geometría, "
+                "se recalculan PAh, Rf, PP, deslizamiento y armado de la llave."
             )
 
     else:
