@@ -270,3 +270,30 @@ AttributeError: module 'funciones_muro' has no attribute 'tabla_momentos_estabil
 La función ahora está garantizada dentro de `funciones_muro.py` y `app.py` verifica
 su existencia antes de llamarla. Además, la tabla funciona aunque el dentellón esté
 desactivado, usando momento cero para ese componente.
+
+
+## Corrección del armado del dentellón
+
+Se corrigió el criterio de armado del dentellón.
+
+Antes la app revisaba erróneamente una longitud de desarrollo vertical usando:
+
+```text
+profundidad del dentellón - recubrimiento
+```
+
+Eso no corresponde cuando el dentellón se detalla como viga corrida. En ese caso:
+
+- las barras principales son **longitudinales**, acostadas a lo largo del muro;
+- los elementos transversales son **estribos cerrados**;
+- la longitud de desarrollo longitudinal se revisa en extremos, empalmes o continuidad
+  a lo largo del muro, no con la profundidad vertical del dentellón.
+
+Nuevo criterio:
+
+- Si el dentellón es pequeño, se considera monolítico con la zapata, como en el PDF.
+- Si el dentellón es profundo, la app propone un detalle tipo viga corrida:
+  - longitudinales `nØ`;
+  - estribos cerrados `Ø @ separación`;
+  - verificación de cortante;
+  - sin fallo automático por `ld` vertical.

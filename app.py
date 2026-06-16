@@ -136,9 +136,14 @@ diametro_talon_mm = st.sidebar.selectbox(
     index=3
 )
 diametro_llave_mm = st.sidebar.selectbox(
-    "Diámetro barra dentellón [mm]",
+    "Diámetro longitudinal dentellón [mm]",
     [10, 12, 14, 16, 18, 20, 22, 25],
     index=1
+)
+diametro_estribo_dentellon_mm = st.sidebar.selectbox(
+    "Diámetro estribo dentellón [mm]",
+    [8, 10, 12],
+    index=0
 )
 
 datos = fm.DatosMuro(
@@ -363,7 +368,8 @@ with col_der:
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
                 diametro_llave_mm=float(diametro_llave_mm),
-                separacion_max_cm=separacion_max_cm
+                separacion_max_cm=separacion_max_cm,
+                diametro_estribo_mm=float(diametro_estribo_dentellon_mm)
             )
 
             col_l1, col_l2, col_l3, col_l4 = st.columns(4)
@@ -436,13 +442,14 @@ with col_der:
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
                 diametro_llave_mm=float(diametro_llave_mm),
-                separacion_max_cm=separacion_max_cm
+                separacion_max_cm=separacion_max_cm,
+                diametro_estribo_mm=float(diametro_estribo_dentellon_mm)
             )
 
             st.subheader("Detalle general de armado")
             st.write(
                 "La imagen reúne en una sola vista el armado de la pantalla, el armado de la zapata "
-                "(puntera y talón) y el detalle del dentellón con longitudinales y estribos."
+                "(puntera y talón) y el dentellón corregido como viga corrida: longitudinales acostadas y estribos cerrados."
             )
 
             fig_det, ax_det = plt.subplots(figsize=(10.0, 6.6), dpi=130)
