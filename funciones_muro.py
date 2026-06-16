@@ -5333,3 +5333,245 @@ def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
         ("Estado cortante talón", resultado["cortante_talon"]["estado"], "-"),
     ]
     return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
+# =============================================================================
+# OVERRIDE FINAL - Pantalla/fuste por caras
+# =============================================================================
+
+def calcular_diseno_fuste_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_vertical_mm: float = 16.0,
+    diametro_horizontal_mm: float = 12.0,
+    separacion_max_cm: float = 30.0,
+    sep_vertical_manual_cm: float | None = None,
+    sep_horizontal_manual_cm: float | None = None,
+    diametro_vertical_frontal_mm: float | None = None,
+    sep_vertical_frontal_manual_cm: float | None = None
+) -> dict:
+    """
+    Diseño del fuste/pantalla por caras.
+
+    Para empuje activo del terreno:
+    - cara posterior/relleno = cara traccionada por flexión;
+    - cara frontal = cara comprimida, se deja con acero mínimo vertical.
+
+    Si en otro caso cambia el sentido del empuje, habría que invertir las caras.
+    """
+    geometria = generar_puntos_muro(datos)
+    tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+    PA = resultado_trial["PA_ton_m"]
+    delta_rad = math.radians(resultado_trial["delta_grados"])
+    PA_h = PA * math.cos(delta_rad)
+
+    h_activa = altura_relleno_en_muro(datos, geometria) if "altura_relleno_en_muro" in globals() else max(0.0, min(datos.altura_relleno, datos.H))
+    brazo = h_activa / 3.0 if h_activa > 0 else 0.0
+
+    gamma_p = 1.50
+    Mu_ton_m = gamma_p * PA_h * brazo
+    Vu_ton = gamma_p * PA_h
+
+    b_cm = 100.0
+    h_cm = datos.t_base * 100.0
+    d_posterior_cm = max(h_cm - recubrimiento_cm - (diametro_vertical_mm / 10.0) / 2.0, 1.0)
+
+    diametro_vertical_frontal_mm = diametro_vertical_mm if diametro_vertical_frontal_mm is None else diametro_vertical_frontal_mm
+    d_frontal_cm = max(h_cm - recubrimiento_cm - (diametro_vertical_frontal_mm / 10.0) / 2.0, 1.0)
+
+    As_flexion = resolver_as_flexion_rectangular(Mu_ton_m, b_cm, d_posterior_cm, datos.fc, datos.fy)
+
+    # Mínimo vertical por cara en pantalla.
+    # Se mantiene el criterio simplificado que venía usando la app:
+    # acero mínimo total 0.0018*b*h, distribuido por cara.
+    As_temp_total = 0.0018 * b_cm * h_cm
+    As_min_cara = As_temp_total / 2.0
+
+    As_posterior_req = max(As_flexion, As_min_cara) if math.isfinite(As_flexion) else float("inf")
+    As_frontal_req = As_min_cara
+
+    if sep_vertical_manual_cm is None:
+        sep_posterior_cm, As_posterior_prov = seleccionar_separacion(
+            area_barra_cm2(diametro_vertical_mm), As_posterior_req, separacion_max_cm
+        )
+        modo_sep_posterior = "Automática"
+    else:
+        sep_posterior_cm = float(sep_vertical_manual_cm)
+        As_posterior_prov = _as_prov_por_separacion(diametro_vertical_mm, sep_posterior_cm) if "_as_prov_por_separacion" in globals() else area_barra_cm2(diametro_vertical_mm) * 100.0 / sep_posterior_cm
+        modo_sep_posterior = "Manual"
+
+    if sep_vertical_frontal_manual_cm is None:
+        sep_frontal_cm, As_frontal_prov = seleccionar_separacion(
+            area_barra_cm2(diametro_vertical_frontal_mm), As_frontal_req, separacion_max_cm
+        )
+        modo_sep_frontal = "Automática"
+    else:
+        sep_frontal_cm = float(sep_vertical_frontal_manual_cm)
+        As_frontal_prov = _as_prov_por_separacion(diametro_vertical_frontal_mm, sep_frontal_cm) if "_as_prov_por_separacion" in globals() else area_barra_cm2(diametro_vertical_frontal_mm) * 100.0 / sep_frontal_cm
+        modo_sep_frontal = "Manual"
+
+    As_horizontal_req = As_min_cara
+    if sep_horizontal_manual_cm is None:
+        sep_horizontal_cm, As_horizontal_prov = seleccionar_separacion(
+            area_barra_cm2(diametro_horizontal_mm), As_horizontal_req, separacion_max_cm
+        )
+        modo_sep_horizontal = "Automática"
+    else:
+        sep_horizontal_cm = float(sep_horizontal_manual_cm)
+        As_horizontal_prov = _as_prov_por_separacion(diametro_horizontal_mm, sep_horizontal_cm) if "_as_prov_por_separacion" in globals() else area_barra_cm2(diametro_horizontal_mm) * 100.0 / sep_horizontal_cm
+        modo_sep_horizontal = "Manual"
+
+    cort = verificar_cortante_rectangular(Vu_ton, b_cm, d_posterior_cm, datos.fc)
+    q_base_ton_m2 = PA_h / h_activa if h_activa > 0 else 0.0
+
+    def estado_as(req, prov):
+        if not math.isfinite(req):
+            return "No cumple: aumentar sección/refuerzo"
+        return "OK" if prov >= req else "No cumple"
+
+    estado_posterior = estado_as(As_posterior_req, As_posterior_prov)
+    estado_frontal = estado_as(As_frontal_req, As_frontal_prov)
+    estado_horizontal = estado_as(As_horizontal_req, As_horizontal_prov)
+
+    return {
+        "PA_ton_m": PA,
+        "delta_grados": resultado_trial["delta_grados"],
+        "alfa_critico_grados": resultado_trial.get("alfa_grados", resultado_trial.get("alfa_critico_grados", 0.0)),
+        "q_base_ton_m2": q_base_ton_m2,
+        "altura_activa_relleno_m": h_activa,
+        "brazo_activo_m": brazo,
+        "Mu_ton_m_m": Mu_ton_m,
+        "Vu_ton_m": Vu_ton,
+        "b_cm": b_cm,
+        "h_cm": h_cm,
+        "d_cm": d_posterior_cm,
+        "d_posterior_cm": d_posterior_cm,
+        "d_frontal_cm": d_frontal_cm,
+
+        "As_flexion_cm2_m": As_flexion,
+        "As_temp_total_cm2_m": As_temp_total,
+        "As_temp_cara_cm2_m": As_min_cara,
+
+        "As_posterior_req_cm2_m": As_posterior_req,
+        "As_posterior_prov_cm2_m": As_posterior_prov,
+        "diametro_vertical_mm": diametro_vertical_mm,
+        "separacion_vertical_cm": sep_posterior_cm,
+        "modo_sep_posterior": modo_sep_posterior,
+        "estado_posterior": estado_posterior,
+
+        "As_frontal_req_cm2_m": As_frontal_req,
+        "As_frontal_prov_cm2_m": As_frontal_prov,
+        "diametro_vertical_frontal_mm": diametro_vertical_frontal_mm,
+        "separacion_vertical_frontal_cm": sep_frontal_cm,
+        "modo_sep_frontal": modo_sep_frontal,
+        "estado_frontal": estado_frontal,
+
+        "diametro_horizontal_mm": diametro_horizontal_mm,
+        "As_horizontal_req_cm2_m": As_horizontal_req,
+        "separacion_horizontal_cm": sep_horizontal_cm,
+        "As_horizontal_prov_cm2_m": As_horizontal_prov,
+        "modo_sep_horizontal": modo_sep_horizontal,
+        "estado_horizontal": estado_horizontal,
+
+        "phi_Vc_ton_m": cort["phi_Vc_ton_m"],
+        "relacion_cortante": cort["relacion"],
+        "estado_cortante": cort["estado"],
+        "tabla_trial": tabla_trial,
+        "resultado_trial": resultado_trial,
+
+        # Alias para compatibilidad con partes antiguas de app.
+        "As_vertical_req_cm2_m": As_posterior_req,
+        "As_vertical_prov_cm2_m": As_posterior_prov,
+        "estado_flexion": estado_posterior,
+    }
+
+
+def tabla_diseno_fuste(resultado: dict) -> pd.DataFrame:
+    """
+    Tabla del fuste/pantalla por caras.
+    """
+    filas = [
+        ("PA dinámico", resultado["PA_ton_m"], "ton/m"),
+        ("δ asumido", resultado["delta_grados"], "grados"),
+        ("α crítico", resultado["alfa_critico_grados"], "grados"),
+        ("q base", resultado["q_base_ton_m2"], "ton/m²"),
+        ("Altura activa de relleno", resultado.get("altura_activa_relleno_m", 0.0), "m"),
+        ("Brazo activo", resultado.get("brazo_activo_m", 0.0), "m"),
+        ("Mu fuste", resultado["Mu_ton_m_m"], "ton·m/m"),
+        ("Vu fuste", resultado["Vu_ton_m"], "ton/m"),
+        ("Peralte efectivo d posterior", resultado["d_posterior_cm"], "cm"),
+        ("As por flexión posterior/relleno", resultado["As_flexion_cm2_m"], "cm²/m"),
+        ("As mínimo por cara", resultado["As_temp_cara_cm2_m"], "cm²/m"),
+
+        ("CARA POSTERIOR / RELLENO", "", ""),
+        ("As posterior requerido", resultado["As_posterior_req_cm2_m"], "cm²/m"),
+        ("As posterior provisto", resultado["As_posterior_prov_cm2_m"], "cm²/m"),
+        ("Armado posterior", f"Ø{resultado['diametro_vertical_mm']:.0f} @ {resultado['separacion_vertical_cm']:.1f}", "mm @ cm"),
+        ("Estado posterior", resultado["estado_posterior"], "-"),
+
+        ("CARA FRONTAL", "", ""),
+        ("As frontal requerido", resultado["As_frontal_req_cm2_m"], "cm²/m"),
+        ("As frontal provisto", resultado["As_frontal_prov_cm2_m"], "cm²/m"),
+        ("Armado frontal", f"Ø{resultado['diametro_vertical_frontal_mm']:.0f} @ {resultado['separacion_vertical_frontal_cm']:.1f}", "mm @ cm"),
+        ("Estado frontal", resultado["estado_frontal"], "-"),
+
+        ("ACERO HORIZONTAL / DISTRIBUCIÓN", "", ""),
+        ("As horizontal requerido", resultado["As_horizontal_req_cm2_m"], "cm²/m"),
+        ("As horizontal provisto", resultado["As_horizontal_prov_cm2_m"], "cm²/m"),
+        ("Armado horizontal", f"Ø{resultado['diametro_horizontal_mm']:.0f} @ {resultado['separacion_horizontal_cm']:.1f}", "mm @ cm"),
+        ("Estado horizontal", resultado["estado_horizontal"], "-"),
+
+        ("φVc fuste", resultado["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc", resultado.get("relacion_cortante", 0.0), "-"),
+        ("Estado cortante", resultado["estado_cortante"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Parámetro", "Valor", "Unidad"])
+
+
+def dibujar_armado_fuste(ax, datos: DatosMuro, geometria: dict, resultado: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja el fuste por caras:
+    - posterior/relleno: acero principal de flexión;
+    - frontal: acero mínimo vertical;
+    - horizontal: distribución.
+    """
+    dibujar_muro(ax, datos, geometria, tamano_texto=8, mostrar_cotas=False, mostrar_ejes=mostrar_ejes)
+
+    x_front = geometria["x_frente_fuste"]
+    x_back_base = geometria["x_dorso_fuste_base"]
+    x_back_top = geometria["x_dorso_fuste_corona"]
+
+    # Barras posterior/relleno siguiendo aproximadamente la cara inclinada posterior.
+    n_barras = 6
+    for i in range(n_barras):
+        y1 = 0.15 + i / max(n_barras - 1, 1) * (datos.H - 0.30)
+        y2 = min(y1 + datos.H / 5.0, datos.H - 0.05)
+        # interpolación de cara posterior
+        def x_back(y):
+            t = y / datos.H if datos.H > 0 else 0.0
+            return x_back_base + t * (x_back_top - x_back_base) - 0.07
+        ax.plot([x_back(y1), x_back(y2)], [y1, y2], linewidth=2.2)
+
+    # Barras frontales mínimas.
+    for i in range(n_barras):
+        y1 = 0.15 + i / max(n_barras - 1, 1) * (datos.H - 0.30)
+        y2 = min(y1 + datos.H / 5.0, datos.H - 0.05)
+        ax.plot([x_front + 0.07, x_front + 0.07], [y1, y2], linewidth=1.6)
+
+    # Barras horizontales esquemáticas.
+    niveles = [datos.H * 0.25, datos.H * 0.45, datos.H * 0.65, datos.H * 0.85]
+    for y in niveles:
+        xb = x_back_base + (y / datos.H) * (x_back_top - x_back_base) - 0.05 if datos.H > 0 else x_back_base
+        ax.plot([x_front + 0.05, xb], [y, y], linewidth=1.4, linestyle="--")
+
+    txt_post = f"Cara posterior/relleno\\nØ{resultado['diametro_vertical_mm']:.0f} @ {resultado['separacion_vertical_cm']:.1f} cm"
+    txt_front = f"Cara frontal/mínimo\\nØ{resultado['diametro_vertical_frontal_mm']:.0f} @ {resultado['separacion_vertical_frontal_cm']:.1f} cm"
+    txt_h = f"Horizontal/distribución\\nØ{resultado['diametro_horizontal_mm']:.0f} @ {resultado['separacion_horizontal_cm']:.1f} cm"
+
+    ax.text(x_back_base + 0.65, datos.H * 0.65, txt_post, fontsize=8, ha="left", va="center")
+    ax.text(max(x_front - 0.35, -0.20), datos.H * 0.35, txt_front, fontsize=8, ha="right", va="center")
+    ax.text(x_front + 0.15, datos.H * 0.15, txt_h, fontsize=8, ha="left", va="center")
+
+    ax.set_title("Armado preliminar del fuste por caras")

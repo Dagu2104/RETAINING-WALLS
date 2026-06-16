@@ -116,15 +116,29 @@ recubrimiento_cm = st.sidebar.number_input(
     step=0.5
 )
 diametro_vertical_mm = st.sidebar.selectbox(
-    "Diámetro barra vertical principal [mm]",
+    "Diámetro vertical cara posterior/relleno [mm]",
     [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
-    index=3
+    index=3,
+    help="Cara en tracción por empuje del terreno. Aquí se compara con el As de flexión requerido."
 )
 sep_vertical_fuste_cm = st.sidebar.number_input(
-    "Separación vertical fuste [cm]",
+    "Separación vertical cara posterior/relleno [cm]",
     min_value=5.0,
     max_value=40.0,
     value=15.0,
+    step=2.5
+)
+diametro_vertical_frontal_mm = st.sidebar.selectbox(
+    "Diámetro vertical cara frontal/mínimo [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25],
+    index=1,
+    help="Cara usualmente comprimida para empuje activo; se revisa contra acero mínimo."
+)
+sep_vertical_frontal_cm = st.sidebar.number_input(
+    "Separación vertical cara frontal/mínimo [cm]",
+    min_value=5.0,
+    max_value=40.0,
+    value=20.0,
     step=2.5
 )
 diametro_horizontal_mm = st.sidebar.selectbox(
@@ -257,6 +271,8 @@ with col_der:
                     diametro_horizontal_mm=float(diametro_horizontal_mm),
                     separacion_max_cm=separacion_max_cm,
                     sep_vertical_manual_cm=sep_vertical_fuste_cm,
+                    sep_vertical_frontal_manual_cm=sep_vertical_frontal_cm,
+                    diametro_vertical_frontal_mm=float(diametro_vertical_frontal_mm),
                     sep_horizontal_manual_cm=sep_horizontal_fuste_cm
                 )
 
@@ -319,8 +335,8 @@ with col_der:
                     {
                         "Grupo": "Pantalla / fuste",
                         "Verificación": "Flexión del fuste",
-                        "Estado": "OK" if resultado_fuste_inicio["As_vertical_prov_cm2_m"] >= resultado_fuste_inicio["As_vertical_req_cm2_m"] else "Revisar",
-                        "Detalle": f"As prov. = {resultado_fuste_inicio['As_vertical_prov_cm2_m']:.2f} cm²/m / As req. = {resultado_fuste_inicio['As_vertical_req_cm2_m']:.2f} cm²/m",
+                        "Estado": resultado_fuste_inicio.get("estado_posterior", "OK"),
+                        "Detalle": f"As post. prov. = {resultado_fuste_inicio['As_posterior_prov_cm2_m']:.2f} cm²/m / As post. req. = {resultado_fuste_inicio['As_posterior_req_cm2_m']:.2f} cm²/m",
                     },
                     {
                         "Grupo": "Pantalla / fuste",
@@ -497,14 +513,18 @@ with col_der:
                 recubrimiento_cm=recubrimiento_cm,
                 diametro_vertical_mm=float(diametro_vertical_mm),
                 diametro_horizontal_mm=float(diametro_horizontal_mm),
-                separacion_max_cm=separacion_max_cm
+                separacion_max_cm=separacion_max_cm,
+                sep_vertical_manual_cm=sep_vertical_fuste_cm,
+                sep_vertical_frontal_manual_cm=sep_vertical_frontal_cm,
+                diametro_vertical_frontal_mm=float(diametro_vertical_frontal_mm),
+                sep_horizontal_manual_cm=sep_horizontal_fuste_cm
             )
 
             col_f1, col_f2, col_f3 = st.columns(3)
             col_f1.metric("Mu fuste", f"{resultado_fuste['Mu_ton_m_m']:.3f} ton·m/m")
-            col_f2.metric("As vertical req.", f"{resultado_fuste['As_vertical_req_cm2_m']:.2f} cm²/m")
+            col_f2.metric("As posterior req.", f"{resultado_fuste['As_posterior_req_cm2_m']:.2f} cm²/m")
             col_f3.metric(
-                "Armado vertical",
+                "Armado posterior",
                 f"Ø{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm"
             )
 
@@ -663,7 +683,11 @@ with col_der:
                 recubrimiento_cm=recubrimiento_cm,
                 diametro_vertical_mm=float(diametro_vertical_mm),
                 diametro_horizontal_mm=float(diametro_horizontal_mm),
-                separacion_max_cm=separacion_max_cm
+                separacion_max_cm=separacion_max_cm,
+                sep_vertical_manual_cm=sep_vertical_fuste_cm,
+                sep_vertical_frontal_manual_cm=sep_vertical_frontal_cm,
+                diametro_vertical_frontal_mm=float(diametro_vertical_frontal_mm),
+                sep_horizontal_manual_cm=sep_horizontal_fuste_cm
             )
 
             resultado_zapata = fm.calcular_diseno_zapata_definitivo(

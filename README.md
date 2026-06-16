@@ -571,3 +571,16 @@ Se corrigió la lógica de flexión de zapata:
 - El signo determina si la tracción está en cara inferior o superior.
 - Cada cara se diseña con el mayor momento que la tracciona.
 - Si una cara no tiene momento de diseño, mantiene acero mínimo.
+
+
+## Pantalla/fuste por caras
+
+Se corrigió el criterio de armado del fuste:
+
+- La cara posterior/relleno se considera como la cara traccionada por el empuje activo del terreno y se diseña con el acero de flexión requerido.
+- La cara frontal se considera como cara comprimida para este caso de carga y se revisa con acero mínimo vertical.
+- Se agregaron entradas separadas para el acero vertical de cara frontal/mínimo.
+- El dibujo del fuste ahora etiqueta:
+  - cara posterior/relleno;
+  - cara frontal/mínimo;
+  - acero horizontal/distribución.
