@@ -878,3 +878,22 @@ def generar_memoria_word(datos: DatosMuro, incluir_pdf: bool = True) -> bytes:
     documento.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
+
+# Lista explícita de nombres que app.py puede importar desde este módulo.
+__all__ = [
+    "DatosMuro",
+    "validar_datos_muro",
+    "generar_puntos_muro",
+    "dibujar_muro",
+    "dibujar_diagrama_fuerzas",
+    "calcular_trial_wedge_activo",
+    "dibujar_trial_wedge_critico",
+    "graficar_curva_trial_wedge",
+    "calcular_verificacion_caltrans_pdf",
+    "tabla_comparacion_pdf",
+    "tabla_fuerzas_pdf",
+    "generar_memoria_word",
+    "resumen_geometria",
+    "convertir_resistencias_a_sistema_interno",
+]
