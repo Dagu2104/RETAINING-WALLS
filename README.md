@@ -156,3 +156,22 @@ Incluye las tres partes solicitadas:
    - Cortante `Vu` vs `φVc`.
    - Longitud de desarrollo preliminar.
    - Esquema didáctico.
+
+
+## Detalle general de armado
+
+Se agregó una nueva pestaña llamada `Detalle general`.
+
+Esta pestaña muestra en una sola imagen:
+
+- Armado de la pantalla o fuste.
+- Armado de la zapata:
+  - puntera;
+  - talón.
+- Armado del dentellón:
+  - barras longitudinales;
+  - estribos cerrados.
+- Un detalle ampliado del dentellón para visualizar mejor el arreglo del acero.
+
+Además, se mejoró la terminología visible en la interfaz para usar **dentellón**
+en lugar de **llave**, que es el término más apropiado en este contexto.

@@ -1936,23 +1936,23 @@ def tabla_deslizamiento_llave(resultado: dict) -> pd.DataFrame:
         ("PP de diseño", resultado["PP_diseno_ton_m"], "ton/m"),
 
         ("3. DETALLE ARMADO LLAVE", "", ""),
-        ("Altura llave", resultado["h_key_m"], "m"),
-        ("Presión pasiva base llave", resultado["p_base_llave_ton_m2"], "ton/m²"),
-        ("Fuerza pasiva sobre llave", resultado["P_llave_ton_m"], "ton/m"),
-        ("Mu llave", resultado["Mu_llave_ton_m_m"], "ton·m/m"),
-        ("Vu llave", resultado["Vu_llave_ton_m"], "ton/m"),
-        ("d llave", resultado["d_llave_cm"], "cm"),
-        ("As flexión llave", resultado["As_llave_flexion_cm2_m"], "cm²/m"),
-        ("As mínimo llave", resultado["As_min_llave_cm2_m"], "cm²/m"),
-        ("As requerido llave", resultado["As_llave_req_cm2_m"], "cm²/m"),
-        ("As provisto llave", resultado["As_llave_prov_cm2_m"], "cm²/m"),
-        ("Armado llave", f"Ø{resultado['diametro_llave_mm']:.0f} @ {resultado['sep_llave_cm']:.1f}", "mm @ cm"),
-        ("φVc llave", resultado["cortante_llave"]["phi_Vc_ton_m"], "ton/m"),
-        ("Estado cortante llave", resultado["cortante_llave"]["estado"], "-"),
-        ("ld llave estimada", resultado["ld_llave_cm"], "cm"),
-        ("Longitud disponible llave", resultado["longitud_disponible_llave_cm"], "cm"),
-        ("Estado anclaje llave", resultado["estado_ld_llave"], "-"),
-        ("Estado armado llave", resultado["estado_armado_llave"], "-"),
+        ("Altura dentellón", resultado["h_key_m"], "m"),
+        ("Presión pasiva base dentellón", resultado["p_base_llave_ton_m2"], "ton/m²"),
+        ("Fuerza pasiva sobre dentellón", resultado["P_llave_ton_m"], "ton/m"),
+        ("Mu dentellón", resultado["Mu_llave_ton_m_m"], "ton·m/m"),
+        ("Vu dentellón", resultado["Vu_llave_ton_m"], "ton/m"),
+        ("d dentellón", resultado["d_llave_cm"], "cm"),
+        ("As flexión dentellón", resultado["As_llave_flexion_cm2_m"], "cm²/m"),
+        ("As mínimo dentellón", resultado["As_min_llave_cm2_m"], "cm²/m"),
+        ("As requerido dentellón", resultado["As_llave_req_cm2_m"], "cm²/m"),
+        ("As provisto dentellón", resultado["As_llave_prov_cm2_m"], "cm²/m"),
+        ("Armado dentellón", f"Ø{resultado['diametro_llave_mm']:.0f} @ {resultado['sep_llave_cm']:.1f}", "mm @ cm"),
+        ("φVc dentellón", resultado["cortante_llave"]["phi_Vc_ton_m"], "ton/m"),
+        ("Estado cortante dentellón", resultado["cortante_llave"]["estado"], "-"),
+        ("ld dentellón estimada", resultado["ld_llave_cm"], "cm"),
+        ("Longitud disponible dentellón", resultado["longitud_disponible_llave_cm"], "cm"),
+        ("Estado anclaje dentellón", resultado["estado_ld_llave"], "-"),
+        ("Estado armado dentellón", resultado["estado_armado_llave"], "-"),
     ]
 
     return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
@@ -2011,7 +2011,7 @@ def dibujar_deslizamiento_pasivo_llave(ax, datos: DatosMuro, geometria: dict, re
             ax,
             (xmid - 0.85, -datos.hz - datos.profundidad_llave * 0.55),
             (x1 + 0.02, -datos.hz - datos.profundidad_llave * 0.55),
-            "PP llave",
+            "PP dentellón",
             dx=-0.05,
             dy=-0.22
         )
@@ -2029,13 +2029,212 @@ def dibujar_deslizamiento_pasivo_llave(ax, datos: DatosMuro, geometria: dict, re
         ax.text(
             xmid,
             -datos.hz - datos.profundidad_llave - 0.18,
-            f"Llave: Ø{resultado['diametro_llave_mm']:.0f} @ {resultado['sep_llave_cm']:.1f} cm",
+            f"Dentellón: Ø{resultado['diametro_llave_mm']:.0f} @ {resultado['sep_llave_cm']:.1f} cm",
             fontsize=8,
             ha="center",
             va="top"
         )
 
-    ax.set_title("Deslizamiento, resistencia pasiva y detalle de llave")
+    ax.set_title("Deslizamiento, resistencia pasiva y detalle del dentellón")
+
+
+
+def dibujar_detalle_general_armado(ax, datos: DatosMuro, geometria: dict, resultado_fuste: dict, resultado_zapata: dict, resultado_dentellon: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja un detalle general de armado del muro de retención.
+
+    El esquema muestra en una sola imagen:
+    - armado de la pantalla o fuste (barras verticales principales y horizontales);
+    - armado de la zapata (puntera y talón);
+    - armado del dentellón, incluyendo barras longitudinales y estribos;
+    - un pequeño detalle ampliado del dentellón para visualizar mejor el armado.
+
+    Todo el texto se alimenta de los resultados dinámicos calculados en la app.
+    """
+    dibujar_muro(ax, datos, geometria, tamano_texto=8, mostrar_cotas=False, mostrar_ejes=mostrar_ejes)
+
+    # -----------------------------
+    # 1) ARMADO DE LA PANTALLA
+    # -----------------------------
+    x_back = geometria["x_dorso_fuste_base"] - 0.06
+    x_front = geometria["x_frente_fuste"] + 0.06
+
+    # Barras verticales principales en la cara del relleno.
+    for x in [x_back - 0.03, x_back]:
+        ax.plot([x, x], [0.12, datos.H - 0.10], linewidth=2.0)
+
+    # Barras horizontales de distribución.
+    for y in [datos.H * 0.18, datos.H * 0.35, datos.H * 0.52, datos.H * 0.69, datos.H * 0.86]:
+        ax.plot([x_front, x_back - 0.05], [y, y], linewidth=1.2, linestyle="--")
+
+    ax.text(
+        datos.B * 0.18,
+        datos.H * 0.72,
+        "Pantalla / fuste",
+        fontsize=10,
+        ha="center",
+        va="center"
+    )
+    ax.text(
+        datos.B * 0.18,
+        datos.H * 0.62,
+        f"Vertical: Ø{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm",
+        fontsize=8,
+        ha="center",
+        va="center"
+    )
+    ax.text(
+        datos.B * 0.18,
+        datos.H * 0.54,
+        f"Horizontal: Ø{resultado_fuste['diametro_horizontal_mm']:.0f} @ {resultado_fuste['separacion_horizontal_cm']:.1f} cm",
+        fontsize=8,
+        ha="center",
+        va="center"
+    )
+
+    # Flecha indicadora hacia el fuste.
+    flecha(ax, (datos.B * 0.28, datos.H * 0.60), (x_back - 0.02, datos.H * 0.60), "", dx=0.0, dy=0.0, tamano=8)
+
+    # -----------------------------
+    # 2) ARMADO DE LA ZAPATA
+    # -----------------------------
+    y_inf = -datos.hz + 0.08
+    y_sup = -0.08
+
+    # Puntera: acero inferior.
+    ax.plot([0.10, max(datos.puntera - 0.08, 0.10)], [y_inf, y_inf], linewidth=2.6)
+    ax.text(
+        datos.puntera * 0.55,
+        y_inf - 0.18,
+        f"Puntera inf.: Ø{resultado_zapata['diametro_puntera_mm']:.0f} @ {resultado_zapata['sep_puntera_cm']:.1f} cm",
+        fontsize=8,
+        ha="center",
+        va="top"
+    )
+
+    # Talón: acero superior.
+    x_ini_talon = datos.puntera + datos.t_base + 0.08
+    x_fin_talon = datos.B - 0.10
+    ax.plot([x_ini_talon, x_fin_talon], [y_sup, y_sup], linewidth=2.6)
+    ax.text(
+        (x_ini_talon + x_fin_talon) / 2,
+        y_sup + 0.16,
+        f"Talón sup.: Ø{resultado_zapata['diametro_talon_mm']:.0f} @ {resultado_zapata['sep_talon_cm']:.1f} cm",
+        fontsize=8,
+        ha="center",
+        va="bottom"
+    )
+
+    # -----------------------------
+    # 3) DENTELLÓN EN EL CORTE DEL MURO
+    # -----------------------------
+    if datos.usar_llave and "llave" in geometria:
+        x1 = datos.pos_llave - datos.ancho_llave / 2
+        x2 = datos.pos_llave + datos.ancho_llave / 2
+        y1 = -datos.hz
+        y2 = -datos.hz - datos.profundidad_llave
+
+        # Barras longitudinales esquemáticas dentro del dentellón.
+        xb1 = x1 + datos.ancho_llave * 0.30
+        xb2 = x1 + datos.ancho_llave * 0.70
+        ax.plot([xb1, xb1], [y2 + 0.05, y1 - 0.05], linewidth=2.0)
+        ax.plot([xb2, xb2], [y2 + 0.05, y1 - 0.05], linewidth=2.0)
+
+        # Estribos esquemáticos.
+        n_est = max(2, int(datos.profundidad_llave / 0.12))
+        for i in range(n_est):
+            yy = y2 + 0.07 + i * (max(datos.profundidad_llave - 0.14, 0.05) / max(n_est - 1, 1))
+            ax.plot([x1 + 0.06, x2 - 0.06], [yy, yy], linewidth=1.0)
+
+        ax.text(
+            (x1 + x2) / 2,
+            y2 - 0.18,
+            f"Dentellón: Long. Ø{resultado_dentellon['diametro_llave_mm']:.0f} @ {resultado_dentellon['sep_llave_cm']:.1f} cm",
+            fontsize=8,
+            ha="center",
+            va="top"
+        )
+        ax.text(
+            (x1 + x2) / 2,
+            y2 - 0.30,
+            "Estribos cerrados (esquemático)",
+            fontsize=8,
+            ha="center",
+            va="top"
+        )
+
+        # -----------------------------
+        # 4) DETALLE AMPLIADO DEL DENTELLÓN
+        # -----------------------------
+        # Ubicación del detalle ampliado a la derecha.
+        det_x0 = datos.B + 0.70
+        det_y0 = max(datos.H * 0.25, 0.90)
+        det_b = max(datos.ancho_llave * 1.5, 0.80)
+        det_h = max(datos.profundidad_llave * 2.0, 1.10)
+
+        # Marco del dentellón ampliado.
+        rect = [
+            (det_x0, det_y0),
+            (det_x0 + det_b, det_y0),
+            (det_x0 + det_b, det_y0 - det_h),
+            (det_x0, det_y0 - det_h),
+        ]
+        ax.add_patch(Polygon(rect, closed=True, fill=False, linewidth=1.8))
+
+        # Estribo interior ampliado.
+        rec = 0.10
+        estribo = [
+            (det_x0 + rec, det_y0 - rec),
+            (det_x0 + det_b - rec, det_y0 - rec),
+            (det_x0 + det_b - rec, det_y0 - det_h + rec),
+            (det_x0 + rec, det_y0 - det_h + rec),
+        ]
+        ax.add_patch(Polygon(estribo, closed=True, fill=False, linewidth=1.3, linestyle="--"))
+
+        # Barras longitudinales (sección transversal del dentellón).
+        xs = [det_x0 + det_b * 0.32, det_x0 + det_b * 0.68]
+        ys = [det_y0 - det_h * 0.25, det_y0 - det_h * 0.75]
+        for xx in xs:
+            for yy in ys:
+                ax.scatter([xx], [yy], s=22)
+
+        ax.text(
+            det_x0 + det_b / 2,
+            det_y0 + 0.12,
+            "Detalle ampliado del dentellón",
+            fontsize=9,
+            ha="center",
+            va="bottom"
+        )
+        ax.text(
+            det_x0 + det_b / 2,
+            det_y0 - det_h - 0.10,
+            f"Longitudinales Ø{resultado_dentellon['diametro_llave_mm']:.0f}",
+            fontsize=8,
+            ha="center",
+            va="top"
+        )
+        ax.text(
+            det_x0 + det_b / 2,
+            det_y0 - det_h - 0.24,
+            "Estribos cerrados",
+            fontsize=8,
+            ha="center",
+            va="top"
+        )
+
+        # Flecha del dentellón real al detalle ampliado.
+        flecha(
+            ax,
+            ((x1 + x2) / 2 + 0.10, y2 + datos.profundidad_llave * 0.40),
+            (det_x0 - 0.10, det_y0 - det_h * 0.45),
+            "",
+            dx=0.0,
+            dy=0.0,
+            tamano=8
+        )
+
+    ax.set_title("Detalle general de armado del muro de retención")
 
 # Lista explícita de nombres que app.py puede importar desde este módulo.
 __all__ = [
@@ -2069,6 +2268,7 @@ __all__ = [
     "tabla_deslizamiento_llave",
     "dibujar_deslizamiento_pasivo_llave",
     "coeficiente_pasivo_rankine",
+    "dibujar_detalle_general_armado",
     "resumen_geometria",
     "convertir_resistencias_a_sistema_interno",
 ]

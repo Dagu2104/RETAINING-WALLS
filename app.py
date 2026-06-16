@@ -29,6 +29,7 @@ from funciones_muro import (
     calcular_deslizamiento_y_llave,
     tabla_deslizamiento_llave,
     dibujar_deslizamiento_pasivo_llave,
+    dibujar_detalle_general_armado,
 )
 
 st.set_page_config(
@@ -38,7 +39,7 @@ st.set_page_config(
 )
 
 st.title("Diseño de muro de contención de hormigón armado")
-st.caption("Base de cálculo: ejemplo de muro de contención de hormigón armado del PDF Caltrans BDP 11.2.")
+st.caption("Base de cálculo: ejemplo de muro de contención de hormigón armado del PDF Caltrans BDP 11.2. Se agregó un detalle general de armado con pantalla, zapata y dentellón.")
 
 st.sidebar.header("Sistema de unidades usado")
 st.sidebar.info(
@@ -66,13 +67,13 @@ altura_relleno = st.sidebar.number_input("Altura de relleno detrás del muro [m]
 pendiente_h = st.sidebar.number_input("Pendiente del relleno: H", min_value=0.10, value=2.00, step=0.10)
 pendiente_v = st.sidebar.number_input("Pendiente del relleno: V", min_value=0.00, value=1.00, step=0.10)
 
-st.sidebar.header("Llave de corte")
+st.sidebar.header("Dentellón")
 
-usar_llave = st.sidebar.checkbox("Incluir llave de corte", value=True)
-ancho_llave = st.sidebar.number_input("Ancho de llave [m]", min_value=0.05, value=0.61, step=0.05, disabled=not usar_llave)
-profundidad_llave = st.sidebar.number_input("Profundidad de llave [m]", min_value=0.05, value=0.23, step=0.05, disabled=not usar_llave)
+usar_llave = st.sidebar.checkbox("Incluir dentellón", value=True)
+ancho_llave = st.sidebar.number_input("Ancho de dentellón [m]", min_value=0.05, value=0.61, step=0.05, disabled=not usar_llave)
+profundidad_llave = st.sidebar.number_input("Profundidad de dentellón [m]", min_value=0.05, value=0.23, step=0.05, disabled=not usar_llave)
 pos_llave = st.sidebar.number_input(
-    "Posición del eje de llave desde el borde frontal [m]",
+    "Posición del eje del dentellón desde el borde frontal [m]",
     min_value=0.10,
     value=4.27,
     step=0.05,
@@ -143,7 +144,7 @@ diametro_talon_mm = st.sidebar.selectbox(
     index=3
 )
 diametro_llave_mm = st.sidebar.selectbox(
-    "Diámetro barra llave [mm]",
+    "Diámetro barra dentellón [mm]",
     [10, 12, 14, 16, 18, 20, 22, 25],
     index=1
 )
@@ -202,7 +203,7 @@ with col_der:
     if not errores:
         geometria = generar_puntos_muro(datos)
 
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata", "Llave y deslizamiento"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata", "Dentellón y deslizamiento", "Detalle general"])
 
         with tab1:
             fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
@@ -378,12 +379,12 @@ with col_der:
             st.subheader("2. Resistencia pasiva")
             st.write(
                 "Se calcula la resistencia pasiva frente a la zapata y la llave. "
-                "La llave aumenta la altura pasiva disponible y por tanto incrementa PP."
+                "El dentellón aumenta la altura pasiva disponible y por tanto incrementa PP."
             )
 
-            st.subheader("3. Detalle de armado de la llave")
+            st.subheader("3. Detalle de armado del dentellón")
             st.write(
-                "La llave se revisa como elemento en voladizo sometido a presión pasiva triangular. "
+                "El dentellón se revisa como elemento en voladizo sometido a presión pasiva triangular. "
                 "Se calcula Mu, Vu, As requerido, As provisto, cortante y anclaje preliminar."
             )
 
@@ -398,8 +399,63 @@ with col_der:
             plt.close(fig_l)
 
             st.info(
-                "Este módulo es dinámico: si cambias φ, γs, μ, altura, zapata, llave o geometría, "
-                "se recalculan PAh, Rf, PP, deslizamiento y armado de la llave."
+                "Este módulo es dinámico: si cambias φ, γs, μ, altura, zapata, dentellón o geometría, "
+                "se recalculan PAh, Rf, PP, deslizamiento y armado del dentellón."
+            )
+
+
+        with tab7:
+            resultado_fuste = calcular_diseno_fuste_dinamico(
+                datos,
+                numero_cunas=numero_cunas,
+                recubrimiento_cm=recubrimiento_cm,
+                diametro_vertical_mm=float(diametro_vertical_mm),
+                diametro_horizontal_mm=float(diametro_horizontal_mm),
+                separacion_max_cm=separacion_max_cm
+            )
+
+            resultado_zapata = calcular_diseno_zapata_definitivo(
+                datos,
+                numero_cunas=numero_cunas,
+                recubrimiento_cm=recubrimiento_cm,
+                diametro_puntera_mm=float(diametro_puntera_mm),
+                diametro_talon_mm=float(diametro_talon_mm),
+                separacion_max_cm=separacion_max_cm
+            )
+
+            resultado_dentellon = calcular_deslizamiento_y_llave(
+                datos,
+                numero_cunas=numero_cunas,
+                recubrimiento_cm=recubrimiento_cm,
+                diametro_llave_mm=float(diametro_llave_mm),
+                separacion_max_cm=separacion_max_cm
+            )
+
+            st.subheader("Detalle general de armado")
+            st.write(
+                "La imagen reúne en una sola vista el armado de la pantalla, el armado de la zapata "
+                "(puntera y talón) y el detalle del dentellón con longitudinales y estribos."
+            )
+
+            fig_det, ax_det = plt.subplots(figsize=(10.0, 6.6), dpi=130)
+            dibujar_detalle_general_armado(
+                ax_det,
+                datos,
+                geometria,
+                resultado_fuste,
+                resultado_zapata,
+                resultado_dentellon,
+                mostrar_ejes=mostrar_ejes
+            )
+            buffer_det = BytesIO()
+            fig_det.savefig(buffer_det, format="png", bbox_inches="tight")
+            buffer_det.seek(0)
+            st.image(buffer_det, width=920)
+            plt.close(fig_det)
+
+            st.caption(
+                "El detalle se actualiza dinámicamente con los diámetros, separaciones, geometría "
+                "y resultados de diseño de cada componente."
             )
 
     else:
