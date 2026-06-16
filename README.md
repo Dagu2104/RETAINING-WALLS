@@ -1,10 +1,8 @@
-# Programa inicial para diseño de muro de contención
+# Programa para diseño de muro de contención
 
-Este proyecto contiene una interfaz en Streamlit para ingresar la geometría y datos básicos de un muro de contención de hormigón armado.
+Base de cálculo inicial: ejemplo de muro de contención de hormigón armado del PDF Caltrans BDP 11.2, sección 11.2.2.
 
 ## Unidades adoptadas
-
-Se usan unidades comunes en Ecuador:
 
 - Longitudes: `m`
 - Capacidad admisible del suelo: `ton/m²`
@@ -17,125 +15,58 @@ Se usan unidades comunes en Ecuador:
 ## Archivos
 
 - `app.py`: interfaz principal de Streamlit.
-- `funciones_muro.py`: funciones separadas para validación, generación de geometría, dibujo, resumen, conversiones y memoria Word.
-- `requirements.txt`: librerías necesarias para ejecutar la app en local o en Streamlit Cloud.
-- `README.md`: instrucciones de instalación y ejecución.
+- `funciones_muro.py`: funciones de geometría, dibujo, diagrama de fuerzas, verificación del PDF y memoria Word.
+- `requirements.txt`: librerías necesarias.
+- `README.md`: instrucciones.
 
-## Instalación local
+## Instalación
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Ejecución local
+## Ejecución
 
 ```bash
 streamlit run app.py
 ```
 
-## Uso en Streamlit Cloud
+## Qué incluye esta versión
 
-Si subes el proyecto a GitHub y luego lo conectas con Streamlit Cloud, asegúrate de incluir el archivo:
+- Dibujo dinámico de la geometría del muro.
+- Dibujo didáctico de fuerzas:
+  - `ΣW`
+  - `khΣW`
+  - `PA / PAE`
+  - `PP / PPE`
+  - `V`
+  - `Rf`
+- Verificación de resultados principales contra el ejemplo del PDF:
+  - Extreme Event
+  - Service
+  - Strength Ia
+  - Strength Ib
+- Memoria preliminar en Word.
 
-```text
-requirements.txt
-```
+## Nota técnica
 
-Ese archivo instala automáticamente las librerías necesarias:
-
-- `streamlit`
-- `matplotlib`
-- `pandas`
-- `python-docx`
-
-## Ajuste del tamaño del dibujo
-
-En la barra lateral de la aplicación se agregó la sección:
-
-```text
-Visualización del dibujo
-```
-
-Desde ahí se puede modificar:
-
-- `Ancho del dibujo en pantalla [px]`
-- `Alto relativo de la figura`
-- `Tamaño de texto de cotas`
-
-Esto evita que el gráfico se vea demasiado grande en Streamlit Cloud.
-
-## Ajuste de la posición de las cotas
-
-La posición de las flechas y textos se controla en `funciones_muro.py`, dentro de la función:
-
-```python
-dibujar_cotas_principales(...)
-```
-
-Para bajar o subir la cota del ancho total de la zapata `B`, modifica:
-
-```python
-y_cota_total = -datos.hz - 0.90
-y_texto_total = -datos.hz - 1.00
-```
-
-Mientras más grande sea el número que se resta, más abajo queda la cota.
-
-## Alcance actual
-
-Este primer módulo dibuja la geometría, organiza los datos de entrada y genera una memoria preliminar en Word.
-
-Luego se pueden agregar módulos para:
-
-- coeficiente activo Ka;
-- empuje activo Pa;
-- empuje sísmico;
-- estabilidad por volcamiento;
-- estabilidad por deslizamiento;
-- presiones de contacto;
-- diseño a flexión del fuste;
-- diseño a cortante;
-- diseño de puntera y talón;
-- diseño de llave de corte;
-- cuantías mínimas y detallado de acero;
-- memoria de cálculo completa en Word con procedimiento paso a paso.
+La verificación usa los valores reportados en el PDF para el método trial wedge, pesos, brazos de momento y resultados de estabilidad externa.  
+En una etapa posterior se puede programar el método trial wedge de forma general para que `PA`, `PAE`, `δA`, `PP` y `PPE` se calculen automáticamente a partir de la geometría y el suelo.
 
 
-## Corrección de NameError
+## Método Trial Wedge
 
-Si aparece un error relacionado con `tamano_texto_cotas`, significa que `app.py` está llamando a esa variable pero no existía el control en la barra lateral.
+Esta versión incorpora una pestaña llamada `Trial Wedge`.
 
-Esta versión ya incluye en `app.py`:
+El programa:
+1. Ensaya varias superficies de falla con distintos ángulos `α`.
+2. Calcula la geometría y peso de cada cuña.
+3. Calcula el empuje `P` para cada cuña.
+4. Toma el mayor valor como `PA`.
 
-```python
-tamano_texto_cotas = st.sidebar.slider(...)
-```
+También genera:
+- dibujo de la cuña crítica;
+- curva `P` vs `α`;
+- tabla de todas las cuñas ensayadas.
 
-y la llamada correcta:
-
-```python
-dibujar_muro(ax, datos, geometria, tamano_texto=tamano_texto_cotas)
-```
-
-
-## Tabla resumen en pantalla
-
-La tabla resumen de geometría se eliminó de la interfaz principal para dejar más espacio al dibujo.  
-Los datos no se eliminaron del programa: siguen disponibles internamente para cálculos y para la memoria Word.
-
-
-## Leyenda del dibujo
-
-La leyenda del gráfico fue eliminada de la imagen para que el esquema del muro quede más limpio y con más espacio visible.
-
-Si luego quieres volver a mostrarla, en `funciones_muro.py` debes revisar la función:
-
-```python
-def dibujar_muro(...)
-```
-
-y restaurar una línea como:
-
-```python
-ax.legend(loc="upper right")
-```
+Esta primera implementación es estática, para suelo sin cohesión, por metro longitudinal de muro. La siguiente etapa puede ampliar el método para caso sísmico `PAE`.

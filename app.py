@@ -7,7 +7,14 @@ from funciones_muro import (
     validar_datos_muro,
     generar_puntos_muro,
     dibujar_muro,
-    resumen_geometria,
+    dibujar_diagrama_fuerzas,
+    calcular_trial_wedge_activo,
+    dibujar_trial_wedge_critico,
+    graficar_curva_trial_wedge,
+    calcular_verificacion_caltrans_pdf,
+    tabla_comparacion_pdf,
+    tabla_fuerzas_pdf,
+    generar_memoria_word,
 )
 
 st.set_page_config(
@@ -16,204 +23,200 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Diseño preliminar de muro de contención de hormigón armado")
-st.caption("Módulo inicial: ingreso dinámico de geometría y dibujo del muro")
+st.title("Diseño de muro de contención de hormigón armado")
+st.caption("Base de cálculo: ejemplo de muro de contención de hormigón armado del PDF Caltrans BDP 11.2.")
 
-st.sidebar.header("Unidades")
-unidades = st.sidebar.selectbox(
-    "Sistema de unidades",
-    ["m", "cm"],
-    index=0
-)
-
-factor = 1.0 if unidades == "m" else 0.01
+st.sidebar.header("Sistema de unidades usado")
 st.sidebar.info(
-    "Si ingresas en cm, el programa convierte internamente a metros para graficar."
+    """
+    **Longitudes:** m  
+    **Resistencia del suelo:** ton/m²  
+    **Hormigón f'c:** kg/cm²  
+    **Acero fy:** kg/cm²  
+    **Pesos unitarios:** ton/m³
+    """
 )
 
-st.sidebar.header("Geometría principal")
+st.sidebar.header("Geometría principal del muro")
 
-H = st.sidebar.number_input(
-    "Altura del fuste H",
-    min_value=0.50,
-    value=4.00,
-    step=0.10,
-    help="Altura desde la cara superior de la zapata hasta la coronación del muro."
-)
+H = st.sidebar.number_input("Altura del fuste H [m]", min_value=0.50, value=4.00, step=0.10)
+B = st.sidebar.number_input("Ancho total de zapata B [m]", min_value=0.50, value=5.79, step=0.10)
+hz = st.sidebar.number_input("Espesor de zapata hz [m]", min_value=0.10, value=0.61, step=0.05)
+puntera = st.sidebar.number_input("Longitud de puntera [m]", min_value=0.10, value=1.68, step=0.05)
+t_base = st.sidebar.number_input("Espesor del fuste en la base [m]", min_value=0.10, value=0.72, step=0.05)
+t_corona = st.sidebar.number_input("Espesor del fuste en la corona [m]", min_value=0.10, value=0.29, step=0.01)
 
-B = st.sidebar.number_input(
-    "Ancho total de zapata B",
-    min_value=0.50,
-    value=2.80,
-    step=0.10,
-    help="Ancho total de la cimentación: puntera + espesor del fuste + talón."
-)
+st.sidebar.header("Relleno y terreno")
 
-Df = st.sidebar.number_input(
-    "Espesor de zapata hz",
-    min_value=0.10,
-    value=0.40,
-    step=0.05,
-    help="Espesor vertical de la zapata."
-)
-
-puntera = st.sidebar.number_input(
-    "Longitud de puntera",
-    min_value=0.10,
-    value=0.80,
-    step=0.05,
-    help="Distancia desde la cara frontal del fuste hasta el borde delantero de la zapata."
-)
-
-t_base = st.sidebar.number_input(
-    "Espesor del fuste en la base",
-    min_value=0.10,
-    value=0.35,
-    step=0.05,
-    help="Espesor del fuste en su unión con la zapata."
-)
-
-t_corona = st.sidebar.number_input(
-    "Espesor del fuste en la corona",
-    min_value=0.10,
-    value=0.25,
-    step=0.05,
-    help="Espesor superior del fuste."
-)
-
-st.sidebar.header("Suelo y relleno")
-
-altura_relleno_sobre_zapata = st.sidebar.number_input(
-    "Altura de relleno detrás del muro",
-    min_value=0.00,
-    value=4.00,
-    step=0.10,
-    help="Altura de relleno medida desde la cara superior de la zapata."
-)
-
-pendiente_relleno_h = st.sidebar.number_input(
-    "Pendiente relleno: horizontal",
-    min_value=0.10,
-    value=2.00,
-    step=0.10,
-    help="Para una pendiente V:H. Ejemplo: 1V:2H."
-)
-
-pendiente_relleno_v = st.sidebar.number_input(
-    "Pendiente relleno: vertical",
-    min_value=0.00,
-    value=0.00,
-    step=0.10,
-    help="Para relleno horizontal usa 0. Para 1V:2H coloca V=1 y H=2."
-)
+altura_relleno = st.sidebar.number_input("Altura de relleno detrás del muro [m]", min_value=0.00, value=6.19, step=0.10)
+pendiente_h = st.sidebar.number_input("Pendiente del relleno: H", min_value=0.10, value=2.00, step=0.10)
+pendiente_v = st.sidebar.number_input("Pendiente del relleno: V", min_value=0.00, value=1.00, step=0.10)
 
 st.sidebar.header("Llave de corte")
 
-usar_llave = st.sidebar.checkbox(
-    "Incluir llave de corte",
-    value=True
-)
-
-ancho_llave = st.sidebar.number_input(
-    "Ancho de llave",
-    min_value=0.05,
-    value=0.25,
-    step=0.05,
-    disabled=not usar_llave
-)
-
-profundidad_llave = st.sidebar.number_input(
-    "Profundidad de llave",
-    min_value=0.05,
-    value=0.35,
-    step=0.05,
-    disabled=not usar_llave
-)
-
+usar_llave = st.sidebar.checkbox("Incluir llave de corte", value=True)
+ancho_llave = st.sidebar.number_input("Ancho de llave [m]", min_value=0.05, value=0.61, step=0.05, disabled=not usar_llave)
+profundidad_llave = st.sidebar.number_input("Profundidad de llave [m]", min_value=0.05, value=0.23, step=0.05, disabled=not usar_llave)
 pos_llave = st.sidebar.number_input(
-    "Posición de llave desde el borde frontal",
+    "Posición del eje de llave desde el borde frontal [m]",
     min_value=0.10,
-    value=1.70,
+    value=4.27,
     step=0.05,
-    disabled=not usar_llave,
-    help="Distancia horizontal desde el borde frontal de la zapata hasta el eje de la llave."
+    disabled=not usar_llave
 )
 
+st.sidebar.header("Propiedades del suelo")
 
-st.sidebar.header("Visualización del dibujo")
+qa = st.sidebar.number_input("Capacidad admisible del suelo qa [ton/m²]", min_value=1.00, value=23.90, step=0.50)
+gamma_suelo = st.sidebar.number_input("Peso unitario del suelo γs [ton/m³]", min_value=0.50, value=1.92, step=0.05)
+phi = st.sidebar.number_input("Ángulo de fricción interna φ [grados]", min_value=0.00, max_value=50.00, value=34.00, step=0.50)
+cohesion = st.sidebar.number_input("Cohesión c [ton/m²]", min_value=0.00, value=0.00, step=0.10)
+mu = st.sidebar.number_input("Coeficiente de fricción suelo-hormigón μ [-]", min_value=0.10, value=0.67, step=0.05)
 
-ancho_dibujo_px = st.sidebar.slider(
-    "Ancho del dibujo en pantalla [px]",
-    min_value=450,
-    max_value=950,
-    value=650,
-    step=50,
-    help="Reduce este valor si la imagen aparece demasiado grande."
-)
+st.sidebar.header("Materiales")
 
-alto_figura = st.sidebar.slider(
-    "Alto relativo de la figura",
-    min_value=4.0,
-    max_value=7.0,
-    value=5.0,
-    step=0.5,
-    help="Controla la altura del lienzo de Matplotlib."
-)
+fc = st.sidebar.number_input("Resistencia del hormigón f'c [kg/cm²]", min_value=140.00, value=281.00, step=10.00)
+fy = st.sidebar.number_input("Fluencia del acero fy [kg/cm²]", min_value=2800.00, value=4218.00, step=100.00)
+gamma_hormigon = st.sidebar.number_input("Peso unitario del hormigón γc [ton/m³]", min_value=1.50, value=2.40, step=0.05)
 
-tamano_texto_cotas = st.sidebar.slider(
-    "Tamaño de texto de cotas",
-    min_value=7,
-    max_value=12,
-    value=8,
-    step=1,
-    help="Reduce este valor si los textos de cotas se sobreponen."
+st.sidebar.header("Vista del dibujo")
+mostrar_cotas = st.sidebar.checkbox("Mostrar cotas", value=True)
+mostrar_ejes = st.sidebar.checkbox("Mostrar ejes y grilla", value=True)
+mostrar_fuerzas = st.sidebar.checkbox("Mostrar diagrama de fuerzas", value=True)
+
+st.sidebar.header("Trial Wedge")
+numero_cunas = st.sidebar.slider(
+    "Número de superficies de falla a ensayar",
+    min_value=30,
+    max_value=500,
+    value=180,
+    step=10
 )
 
 datos = DatosMuro(
-    H=H * factor,
-    B=B * factor,
-    hz=Df * factor,
-    puntera=puntera * factor,
-    t_base=t_base * factor,
-    t_corona=t_corona * factor,
-    altura_relleno=altura_relleno_sobre_zapata * factor,
-    pendiente_h=pendiente_relleno_h,
-    pendiente_v=pendiente_relleno_v,
+    H=H,
+    B=B,
+    hz=hz,
+    puntera=puntera,
+    t_base=t_base,
+    t_corona=t_corona,
+    altura_relleno=altura_relleno,
+    pendiente_h=pendiente_h,
+    pendiente_v=pendiente_v,
     usar_llave=usar_llave,
-    ancho_llave=ancho_llave * factor,
-    profundidad_llave=profundidad_llave * factor,
-    pos_llave=pos_llave * factor,
+    ancho_llave=ancho_llave,
+    profundidad_llave=profundidad_llave,
+    pos_llave=pos_llave,
+    qa=qa,
+    gamma_suelo=gamma_suelo,
+    phi=phi,
+    cohesion=cohesion,
+    mu=mu,
+    fc=fc,
+    fy=fy,
+    gamma_hormigon=gamma_hormigon,
 )
 
-col_izq, col_der = st.columns([1.05, 1.30])
+errores = validar_datos_muro(datos)
+
+col_izq, col_der = st.columns([0.33, 1.67])
 
 with col_izq:
-    st.subheader("Datos ingresados")
-    errores = validar_datos_muro(datos)
-
     if errores:
-        st.error("Corrige los siguientes datos antes de continuar:")
+        st.error("Corrige los datos de entrada:")
         for error in errores:
             st.write(f"• {error}")
     else:
-        st.success("La geometría ingresada es válida para dibujo preliminar.")
+        memoria_bytes = generar_memoria_word(datos, incluir_pdf=True)
+        st.download_button(
+            label="Descargar memoria preliminar Word",
+            data=memoria_bytes,
+            file_name="memoria_muro_contencion.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
 
-    st.caption("La tabla resumen se eliminó de la interfaz. Los datos se conservan para cálculos y memoria Word.")
+    with st.expander("Verificación con ejemplo del PDF"):
+        resultados_pdf = calcular_verificacion_caltrans_pdf()
+        st.write("Se calculan los estados límite del ejemplo Caltrans usando los valores del PDF.")
+        st.dataframe(tabla_comparacion_pdf(resultados_pdf), use_container_width=True, hide_index=True)
 
-    st.info(
-        "Este módulo solo dibuja la geometría. Luego se pueden agregar: "
-        "empuje activo, estabilidad por volcamiento/deslizamiento, presiones de contacto, "
-        "diseño a flexión/cortante y acero."
-    )
+    with st.expander("Fuerzas del ejemplo PDF"):
+        st.dataframe(tabla_fuerzas_pdf(), use_container_width=True, hide_index=True)
 
 with col_der:
-    st.subheader("Vista dinámica del muro")
-
     if not errores:
         geometria = generar_puntos_muro(datos)
-        fig, ax = plt.subplots(figsize=(9, 6))
-        dibujar_muro(ax, datos, geometria, tamano_texto=tamano_texto_cotas)
 
-        st.pyplot(fig, clear_figure=True)
+        tab1, tab2, tab3 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge"])
+
+        with tab1:
+            fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+            dibujar_muro(
+                ax,
+                datos,
+                geometria,
+                tamano_texto=8,
+                mostrar_cotas=mostrar_cotas,
+                mostrar_ejes=mostrar_ejes
+            )
+            buffer_figura = BytesIO()
+            fig.savefig(buffer_figura, format="png", bbox_inches="tight")
+            buffer_figura.seek(0)
+            st.image(buffer_figura, width=760)
+            plt.close(fig)
+
+        with tab2:
+            if mostrar_fuerzas:
+                fig_f, ax_f = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+                dibujar_diagrama_fuerzas(
+                    ax_f,
+                    datos,
+                    geometria,
+                    mostrar_ejes=mostrar_ejes
+                )
+                buffer_fuerzas = BytesIO()
+                fig_f.savefig(buffer_fuerzas, format="png", bbox_inches="tight")
+                buffer_fuerzas.seek(0)
+                st.image(buffer_fuerzas, width=760)
+                plt.close(fig_f)
+            else:
+                st.info("Activa 'Mostrar diagrama de fuerzas' en la barra lateral.")
+
+        with tab3:
+            tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                st.metric("PA estático por Trial Wedge", f"{resultado_trial['PA_ton_m']:.3f} ton/m")
+                st.metric("Ángulo crítico α", f"{resultado_trial['alfa_grados']:.2f}°")
+                st.metric("Peso de cuña crítica W", f"{resultado_trial['peso_cuna_ton_m']:.3f} ton/m")
+
+            with col_b:
+                st.write("Resultado crítico")
+                st.dataframe(
+                    tabla_trial.loc[tabla_trial["P [ton/m]"].idxmax()].to_frame().T,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            fig_cuna, ax_cuna = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+            dibujar_trial_wedge_critico(ax_cuna, datos, geometria, resultado_trial, mostrar_ejes=mostrar_ejes)
+            buffer_cuna = BytesIO()
+            fig_cuna.savefig(buffer_cuna, format="png", bbox_inches="tight")
+            buffer_cuna.seek(0)
+            st.image(buffer_cuna, width=760)
+            plt.close(fig_cuna)
+
+            fig_curva, ax_curva = plt.subplots(figsize=(8.2, 4.2), dpi=130)
+            graficar_curva_trial_wedge(ax_curva, tabla_trial)
+            buffer_curva = BytesIO()
+            fig_curva.savefig(buffer_curva, format="png", bbox_inches="tight")
+            buffer_curva.seek(0)
+            st.image(buffer_curva, width=760)
+            plt.close(fig_curva)
+
+            with st.expander("Ver todas las cuñas ensayadas"):
+                st.dataframe(tabla_trial, use_container_width=True, hide_index=True)
+
     else:
         st.warning("El dibujo se mostrará cuando la geometría sea válida.")
