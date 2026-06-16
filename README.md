@@ -229,3 +229,31 @@ Ahora el flujo es:
 
 Así, el programa ya no fuerza `x`, `e`, `B'`, `q` ni `R` para que cuadren con el PDF;
 los calcula a partir de los insumos del caso.
+
+
+## Ubicación dinámica del dentellón y momentos
+
+Se agregó una opción en la barra lateral para definir la ubicación del dentellón:
+
+- `Bajo pantalla`
+- `Según PDF / hacia talón`
+- `Personalizada`
+
+La posición del dentellón ya no afecta solo el dibujo. Ahora también entra en el
+cálculo de momentos estabilizantes:
+
+```text
+M_dentellón = W_dentellón · x_dentellón
+```
+
+Por tanto, al mover el dentellón se recalculan:
+
+- momento estabilizante total;
+- momento neto;
+- posición de la resultante `x`;
+- excentricidad `e`;
+- presiones `qmax` y `qmin`;
+- revisión de contacto y estabilidad asociada.
+
+También se agregó una tabla específica de `Momentos estabilizantes y desestabilizantes`
+dentro de las pestañas de zapata y dentellón.

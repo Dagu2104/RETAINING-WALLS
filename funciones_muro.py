@@ -895,6 +895,48 @@ def graficar_curva_trial_wedge(ax, tabla_trial: pd.DataFrame):
     ax.set_title("Búsqueda de PA mediante Trial Wedge")
     ax.grid(True, linestyle=":", linewidth=0.7)
 
+
+
+def tabla_momentos_estabilidad(presiones: dict) -> pd.DataFrame:
+    """
+    Tabla de momentos estabilizantes y desestabilizantes usados para la resultante.
+
+    Muestra explícitamente cómo la posición del dentellón modifica su aporte:
+    M_dentellón = W_dentellón * x_dentellón.
+    """
+    filas = [
+        ("ESTABILIZANTES", "", "", ""),
+        ("Peso zapata", presiones.get("W_zapata_ton_m", 0.0), presiones.get("x_zapata_m", 0.0), presiones.get("M_est_zapata_ton_m_m", 0.0)),
+        ("Peso fuste/pantalla", presiones.get("W_fuste_ton_m", 0.0), presiones.get("x_fuste_m", 0.0), presiones.get("M_est_fuste_ton_m_m", 0.0)),
+        ("Peso dentellón", presiones.get("W_dentellon_ton_m", 0.0), presiones.get("x_dentellon_m", 0.0), presiones.get("M_est_dentellon_ton_m_m", 0.0)),
+        ("Peso suelo sobre talón", presiones.get("W_suelo_talon_ton_m", 0.0), presiones.get("x_suelo_talon_m", 0.0), presiones.get("M_est_suelo_talon_ton_m_m", 0.0)),
+        ("Peso adicional por pendiente", presiones.get("W_pendiente_ton_m", 0.0), presiones.get("x_pendiente_m", 0.0), presiones.get("M_est_pendiente_ton_m_m", 0.0)),
+        ("Componente vertical PA", presiones.get("PA_v_ton_m", 0.0), None, presiones.get("M_est_PA_v_ton_m_m", 0.0)),
+        ("Total estabilizante", "", "", presiones.get("M_est_ton_m_m", 0.0)),
+        ("DESESTABILIZANTES", "", "", ""),
+        ("Componente horizontal PAh", presiones.get("PA_h_ton_m", 0.0), presiones.get("brazo_PA_h_m", 0.0), presiones.get("M_volc_PA_h_ton_m_m", 0.0)),
+        ("Total desestabilizante", "", "", presiones.get("M_volc_ton_m_m", 0.0)),
+        ("RESULTANTE", "", "", ""),
+        ("M neto = M_est - M_volc", "", "", presiones.get("M_est_ton_m_m", 0.0) - presiones.get("M_volc_ton_m_m", 0.0)),
+        ("x resultante", "", "", presiones.get("x_resultante_m", 0.0)),
+        ("e", "", "", presiones.get("e_m", 0.0)),
+    ]
+
+    return pd.DataFrame(filas, columns=["Concepto", "Fuerza [ton/m]", "Brazo x o y [m]", "Momento [ton·m/m]"])
+
+
+def recomendar_posicion_dentellon(datos: DatosMuro, modo: str) -> float:
+    """
+    Devuelve una posición sugerida para el dentellón según el modo seleccionado.
+    """
+    if modo == "Bajo pantalla":
+        return datos.puntera + datos.t_base / 2.0
+    if modo == "Según PDF / hacia talón":
+        # En el ejemplo del PDF, el dentellón se ubica hacia el talón.
+        return min(max(datos.puntera + datos.t_base + 0.70 * calcular_talon(datos), datos.ancho_llave / 2.0), datos.B - datos.ancho_llave / 2.0)
+    return datos.pos_llave
+
+
 def agregar_tabla_dataframe(documento: Document, tabla: pd.DataFrame):
     """
     Inserta un DataFrame como tabla Word.
@@ -1253,6 +1295,9 @@ def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 1
     PA_h = PA * math.cos(delta)
 
     # Pesos por metro longitudinal.
+    # Se toman momentos alrededor de la puntera inferior O, con signo:
+    # + estabilizante horario por cargas verticales hacia abajo ubicadas a x>0
+    # - desestabilizante antihorario por empujes horizontales.
     area_zapata = datos.B * datos.hz
     W_zapata = area_zapata * datos.gamma_hormigon
     x_zapata = datos.B / 2.0
@@ -1260,6 +1305,14 @@ def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 1
     area_fuste = (datos.t_base + datos.t_corona) / 2.0 * datos.H
     W_fuste = area_fuste * datos.gamma_hormigon
     x_fuste = datos.puntera + (datos.t_base + datos.t_corona) / 4.0
+
+    # Peso propio del dentellón. Su posición sí modifica el momento estabilizante.
+    if datos.usar_llave:
+        W_dentellon = datos.ancho_llave * datos.profundidad_llave * datos.gamma_hormigon
+        x_dentellon = datos.pos_llave
+    else:
+        W_dentellon = 0.0
+        x_dentellon = 0.0
 
     talon = calcular_talon(datos)
     altura_suelo_talon = max(datos.altura_relleno, datos.H)
@@ -1277,19 +1330,28 @@ def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 1
         W_pendiente = 0.0
         x_pendiente = datos.puntera + datos.t_base + talon / 2.0
 
-    # Momento positivo estabilizador respecto a puntera inferior O.
-    V = W_zapata + W_fuste + W_suelo_talon + W_pendiente + PA_v
+    # Momento estabilizante por cargas verticales.
+    M_est_zapata = W_zapata * x_zapata
+    M_est_fuste = W_fuste * x_fuste
+    M_est_dentellon = W_dentellon * x_dentellon
+    M_est_suelo_talon = W_suelo_talon * x_suelo_talon
+    M_est_pendiente = W_pendiente * x_pendiente
+    M_est_PA_v = PA_v * datos.B
+
+    V = W_zapata + W_fuste + W_dentellon + W_suelo_talon + W_pendiente + PA_v
     M_est = (
-        W_zapata * x_zapata
-        + W_fuste * x_fuste
-        + W_suelo_talon * x_suelo_talon
-        + W_pendiente * x_pendiente
-        + PA_v * datos.B
+        M_est_zapata
+        + M_est_fuste
+        + M_est_dentellon
+        + M_est_suelo_talon
+        + M_est_pendiente
+        + M_est_PA_v
     )
 
     # Momento volcador por componente horizontal del empuje.
     brazo_PA_h = datos.H / 3.0
-    M_volc = PA_h * brazo_PA_h
+    M_volc_PA_h = PA_h * brazo_PA_h
+    M_volc = M_volc_PA_h
 
     M_resultante = M_est - M_volc
     x_resultante = M_resultante / V if V > 0 else float("nan")
@@ -1309,11 +1371,25 @@ def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 1
         "PA_h_ton_m": PA_h,
         "PA_v_ton_m": PA_v,
         "W_zapata_ton_m": W_zapata,
+        "x_zapata_m": x_zapata,
+        "M_est_zapata_ton_m_m": M_est_zapata,
         "W_fuste_ton_m": W_fuste,
+        "x_fuste_m": x_fuste,
+        "M_est_fuste_ton_m_m": M_est_fuste,
+        "W_dentellon_ton_m": W_dentellon,
+        "x_dentellon_m": x_dentellon,
+        "M_est_dentellon_ton_m_m": M_est_dentellon,
         "W_suelo_talon_ton_m": W_suelo_talon,
+        "x_suelo_talon_m": x_suelo_talon,
+        "M_est_suelo_talon_ton_m_m": M_est_suelo_talon,
         "W_pendiente_ton_m": W_pendiente,
+        "x_pendiente_m": x_pendiente,
+        "M_est_pendiente_ton_m_m": M_est_pendiente,
+        "M_est_PA_v_ton_m_m": M_est_PA_v,
         "V_total_ton_m": V,
         "M_est_ton_m_m": M_est,
+        "brazo_PA_h_m": brazo_PA_h,
+        "M_volc_PA_h_ton_m_m": M_volc_PA_h,
         "M_volc_ton_m_m": M_volc,
         "x_resultante_m": x_resultante,
         "e_m": e,
@@ -2358,4 +2434,6 @@ __all__ = [
     "dibujar_detalle_general_armado",
     "resumen_geometria",
     "convertir_resistencias_a_sistema_interno",
+    "recomendar_posicion_dentellon",
+    "tabla_momentos_estabilidad",
 ]

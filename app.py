@@ -44,13 +44,33 @@ st.sidebar.header("Dentellón")
 usar_llave = st.sidebar.checkbox("Incluir dentellón", value=True)
 ancho_llave = st.sidebar.number_input("Ancho de dentellón [m]", min_value=0.05, value=0.61, step=0.05, disabled=not usar_llave)
 profundidad_llave = st.sidebar.number_input("Profundidad de dentellón [m]", min_value=0.05, value=0.23, step=0.05, disabled=not usar_llave)
-pos_llave = st.sidebar.number_input(
-    "Posición del eje del dentellón desde el borde frontal [m]",
-    min_value=0.10,
-    value=4.27,
-    step=0.05,
-    disabled=not usar_llave
+
+modo_dentellon = st.sidebar.selectbox(
+    "Ubicación del dentellón",
+    ["Bajo pantalla", "Según PDF / hacia talón", "Personalizada"],
+    index=2,
+    disabled=not usar_llave,
+    help="La ubicación modifica el brazo de su peso propio y, por tanto, los momentos estabilizantes."
 )
+
+pos_bajo_pantalla = puntera + t_base / 2.0
+talon_tmp = B - puntera - t_base
+pos_pdf_talon = min(max(puntera + t_base + 0.70 * talon_tmp, ancho_llave / 2.0), B - ancho_llave / 2.0)
+
+if modo_dentellon == "Bajo pantalla":
+    pos_llave = pos_bajo_pantalla
+    st.sidebar.caption(f"Posición automática: {pos_llave:.2f} m desde el borde frontal.")
+elif modo_dentellon == "Según PDF / hacia talón":
+    pos_llave = pos_pdf_talon
+    st.sidebar.caption(f"Posición automática: {pos_llave:.2f} m desde el borde frontal.")
+else:
+    pos_llave = st.sidebar.number_input(
+        "Posición del eje del dentellón desde el borde frontal [m]",
+        min_value=0.10,
+        value=4.27,
+        step=0.05,
+        disabled=not usar_llave
+    )
 
 st.sidebar.header("Propiedades del suelo")
 
@@ -302,6 +322,13 @@ with col_der:
             st.subheader("1. Presiones de contacto")
             st.dataframe(fm.tabla_presiones_contacto(presiones), use_container_width=True, hide_index=True)
 
+            st.subheader("1.1 Momentos estabilizantes y desestabilizantes")
+            st.write(
+                "La posición del dentellón entra en el cálculo mediante su brazo x. "
+                "Al moverlo, cambia M = W·x y se recalculan x, e, qmax y qmin."
+            )
+            st.dataframe(fm.tabla_momentos_estabilidad(presiones), use_container_width=True, hide_index=True)
+
             fig_q, ax_q = plt.subplots(figsize=(8.2, 5.6), dpi=130)
             fm.dibujar_presiones_contacto(ax_q, datos, geometria, presiones, mostrar_ejes=mostrar_ejes)
             buffer_q = BytesIO()
@@ -361,6 +388,9 @@ with col_der:
             )
 
             st.dataframe(fm.tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
+
+            st.subheader("4. Efecto de la ubicación del dentellón en momentos")
+            st.dataframe(fm.tabla_momentos_estabilidad(resultado_llave["presiones"]), use_container_width=True, hide_index=True)
 
             fig_l, ax_l = plt.subplots(figsize=(8.2, 5.6), dpi=130)
             fm.dibujar_deslizamiento_pasivo_llave(ax_l, datos, geometria, resultado_llave, mostrar_ejes=mostrar_ejes)
