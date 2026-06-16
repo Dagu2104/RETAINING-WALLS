@@ -519,3 +519,16 @@ Se corrigió el criterio de diseño de la zapata:
 - La cara inferior toma el momento de puntera cuando existe. Si `puntera = 0`, no se coloca `NaN`; se asigna el acero mínimo por cara de la zapata.
 - La cara superior toma el momento del talón.
 - Así el elemento zapata siempre tiene acero inferior y superior, aunque una de las zonas no tenga voladizo geométrico.
+
+
+## Zapata por signo del momento y relleno sobre puntera
+
+Se actualizó el criterio de diseño de la zapata:
+
+- Se siguen calculando puntera y talón por separado.
+- Ya no se asigna ciegamente puntera=inferior y talón=superior.
+- Ahora se calcula la carga neta y el signo del momento:
+  - si la zona trabaja con tracción inferior, la demanda entra al acero inferior;
+  - si trabaja con tracción superior, la demanda entra al acero superior.
+- Se agregó la entrada `Altura de relleno sobre puntera [m]`.
+- Ese relleno se incluye como carga vertical sobre la puntera y puede reducir o invertir el momento de la puntera.

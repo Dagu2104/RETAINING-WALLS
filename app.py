@@ -36,6 +36,13 @@ t_corona = st.sidebar.number_input("Espesor del fuste en la corona [m]", min_val
 st.sidebar.header("Relleno y terreno")
 
 altura_relleno = st.sidebar.number_input("Altura de relleno detrás del muro [m]", min_value=0.00, value=6.19, step=0.10)
+altura_relleno_puntera = st.sidebar.number_input(
+    "Altura de relleno sobre puntera [m]",
+    min_value=0.00,
+    value=0.00,
+    step=0.10,
+    help="Carga vertical de suelo sobre la puntera. Puede reducir o invertir el momento de la puntera."
+)
 pendiente_h = st.sidebar.number_input("Pendiente del relleno: H", min_value=0.10, value=2.00, step=0.10)
 pendiente_v = st.sidebar.number_input("Pendiente del relleno: V", min_value=0.00, value=1.00, step=0.10)
 
@@ -200,6 +207,9 @@ datos = fm.DatosMuro(
     fy=fy,
     gamma_hormigon=gamma_hormigon,
 )
+
+# Atributo adicional: relleno/carga de suelo sobre la puntera.
+setattr(datos, "altura_relleno_puntera", altura_relleno_puntera)
 
 errores = fm.validar_datos_muro(datos)
 
