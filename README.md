@@ -573,14 +573,17 @@ Se corrigió la lógica de flexión de zapata:
 - Si una cara no tiene momento de diseño, mantiene acero mínimo.
 
 
-## Pantalla/fuste por caras
+## Corrección TypeError en fuste por caras
 
-Se corrigió el criterio de armado del fuste:
+Se corrigió el error de Streamlit en la pestaña Detalle general / Armado fuste.
 
-- La cara posterior/relleno se considera como la cara traccionada por el empuje activo del terreno y se diseña con el acero de flexión requerido.
-- La cara frontal se considera como cara comprimida para este caso de carga y se revisa con acero mínimo vertical.
-- Se agregaron entradas separadas para el acero vertical de cara frontal/mínimo.
-- El dibujo del fuste ahora etiqueta:
-  - cara posterior/relleno;
-  - cara frontal/mínimo;
-  - acero horizontal/distribución.
+Causa probable: `app.py` estaba llamando nuevos argumentos del fuste por caras, pero Streamlit podía seguir usando una versión antigua de `funciones_muro.py` en caché o no sincronizada.
+
+Corrección aplicada:
+
+- Se agregó una llamada robusta `calcular_fuste_app()`.
+- La app filtra automáticamente los argumentos aceptados por la versión cargada de `funciones_muro.py`.
+- Se agregaron alias de salida para evitar errores si todavía existe una versión anterior en caché.
+- La función final del fuste también acepta `**kwargs` como protección adicional.
+
+Recomendación: subir los 4 archivos juntos y ejecutar `Manage app → Reboot app`.

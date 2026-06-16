@@ -1,8 +1,77 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 from io import BytesIO
+import inspect
 
 import funciones_muro as fm
+
+
+def calcular_fuste_app(
+    datos,
+    numero_cunas,
+    recubrimiento_cm,
+    diametro_vertical_mm,
+    diametro_horizontal_mm,
+    separacion_max_cm,
+    sep_vertical_manual_cm,
+    sep_vertical_frontal_manual_cm,
+    diametro_vertical_frontal_mm,
+    sep_horizontal_manual_cm
+):
+    """
+    Llamada robusta al diseño del fuste.
+
+    Evita TypeError si Streamlit queda con app.py actualizado pero
+    funciones_muro.py antiguo en caché. Además completa alias de salida.
+    """
+    kwargs = dict(
+        datos=datos,
+        numero_cunas=numero_cunas,
+        recubrimiento_cm=recubrimiento_cm,
+        diametro_vertical_mm=diametro_vertical_mm,
+        diametro_horizontal_mm=diametro_horizontal_mm,
+        separacion_max_cm=separacion_max_cm,
+        sep_vertical_manual_cm=sep_vertical_manual_cm,
+        sep_vertical_frontal_manual_cm=sep_vertical_frontal_manual_cm,
+        diametro_vertical_frontal_mm=diametro_vertical_frontal_mm,
+        sep_horizontal_manual_cm=sep_horizontal_manual_cm,
+    )
+
+    firma = inspect.signature(fm.calcular_diseno_fuste_dinamico)
+    kwargs_filtrados = {k: v for k, v in kwargs.items() if k in firma.parameters}
+    resultado = calcular_fuste_app(**kwargs_filtrados)
+
+    # Alias para que la app no falle aunque una función antigua no devuelva
+    # todavía las claves por cara.
+    resultado.setdefault("As_posterior_req_cm2_m", resultado.get("As_vertical_req_cm2_m", 0.0))
+    resultado.setdefault("As_posterior_prov_cm2_m", resultado.get("As_vertical_prov_cm2_m", 0.0))
+    resultado.setdefault("estado_posterior", resultado.get("estado_flexion", "OK"))
+    resultado.setdefault("diametro_vertical_mm", diametro_vertical_mm)
+    resultado.setdefault("separacion_vertical_cm", sep_vertical_manual_cm)
+
+    resultado.setdefault("As_frontal_req_cm2_m", resultado.get("As_temp_cara_cm2_m", 0.0))
+    resultado.setdefault(
+        "As_frontal_prov_cm2_m",
+        fm.area_barra_cm2(diametro_vertical_frontal_mm) * 100.0 / sep_vertical_frontal_manual_cm
+        if sep_vertical_frontal_manual_cm else 0.0
+    )
+    resultado.setdefault("diametro_vertical_frontal_mm", diametro_vertical_frontal_mm)
+    resultado.setdefault("separacion_vertical_frontal_cm", sep_vertical_frontal_manual_cm)
+    resultado.setdefault(
+        "estado_frontal",
+        "OK" if resultado["As_frontal_prov_cm2_m"] >= resultado["As_frontal_req_cm2_m"] else "No cumple"
+    )
+
+    resultado.setdefault("As_horizontal_req_cm2_m", resultado.get("As_temp_cara_cm2_m", 0.0))
+    resultado.setdefault("separacion_horizontal_cm", sep_horizontal_manual_cm)
+    resultado.setdefault(
+        "As_horizontal_prov_cm2_m",
+        fm.area_barra_cm2(diametro_horizontal_mm) * 100.0 / sep_horizontal_manual_cm
+        if sep_horizontal_manual_cm else resultado.get("As_horizontal_prov_cm2_m", 0.0)
+    )
+    return resultado
+
+
 
 st.set_page_config(
     page_title="Diseño de muro de contención",
@@ -263,7 +332,7 @@ with col_der:
             # Se calculan aquí los estados principales para que el usuario no tenga
             # que entrar a cada pestaña solo para saber si el diseño cumple.
             try:
-                resultado_fuste_inicio = fm.calcular_diseno_fuste_dinamico(
+                resultado_fuste_inicio = calcular_fuste_app(
                     datos,
                     numero_cunas=numero_cunas,
                     recubrimiento_cm=recubrimiento_cm,
@@ -507,7 +576,7 @@ with col_der:
 
 
         with tab4:
-            resultado_fuste = fm.calcular_diseno_fuste_dinamico(
+            resultado_fuste = calcular_fuste_app(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -677,7 +746,7 @@ with col_der:
 
 
         with tab7:
-            resultado_fuste = fm.calcular_diseno_fuste_dinamico(
+            resultado_fuste = calcular_fuste_app(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
