@@ -88,3 +88,21 @@ El programa recalcula dinámicamente:
 - Esquema didáctico del armado.
 
 La demanda sigue el criterio mostrado en el PDF para el fuste: el empuje activo actúa a `H/3` desde la base del fuste y el momento máximo se calcula en la base.
+
+
+## Zapata dinámica
+
+Se agregó la pestaña `Zapata`.
+
+El programa recalcula dinámicamente:
+
+- Resultante vertical.
+- Excentricidad.
+- Presiones de contacto `qmax` y `qmin`.
+- Estado frente a `qa`.
+- Momento preliminar de puntera.
+- Momento preliminar de talón.
+- Acero requerido y provisto en puntera y talón.
+- Esquema didáctico del armado de zapata.
+
+Este módulo es preliminar y debe depurarse con los siguientes pasos del PDF para llegar al detallado final completo.

@@ -18,6 +18,11 @@ from funciones_muro import (
     calcular_diseno_fuste_dinamico,
     tabla_diseno_fuste,
     dibujar_armado_fuste,
+    calcular_diseno_zapata_dinamico,
+    tabla_presiones_contacto,
+    tabla_diseno_zapata,
+    dibujar_presiones_contacto,
+    dibujar_armado_zapata,
 )
 
 st.set_page_config(
@@ -121,6 +126,17 @@ separacion_max_cm = st.sidebar.number_input(
     step=2.5
 )
 
+diametro_puntera_mm = st.sidebar.selectbox(
+    "Diámetro barra puntera [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
+    index=3
+)
+diametro_talon_mm = st.sidebar.selectbox(
+    "Diámetro barra talón [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
+    index=3
+)
+
 datos = DatosMuro(
     H=H,
     B=B,
@@ -175,7 +191,7 @@ with col_der:
     if not errores:
         geometria = generar_puntos_muro(datos)
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata"])
 
         with tab1:
             fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
@@ -278,6 +294,51 @@ with col_der:
             st.caption(
                 "El armado se recalcula dinámicamente con la geometría, propiedades del suelo, f'c, fy, "
                 "diámetros seleccionados y PA obtenido por Trial Wedge."
+            )
+
+
+        with tab5:
+            resultado_zapata = calcular_diseno_zapata_dinamico(
+                datos,
+                numero_cunas=numero_cunas,
+                recubrimiento_cm=recubrimiento_cm,
+                diametro_puntera_mm=float(diametro_puntera_mm),
+                diametro_talon_mm=float(diametro_talon_mm),
+                separacion_max_cm=separacion_max_cm
+            )
+
+            presiones = resultado_zapata["presiones"]
+
+            col_z1, col_z2, col_z3 = st.columns(3)
+            col_z1.metric("qmax", f"{presiones['qmax_ton_m2']:.2f} ton/m²")
+            col_z2.metric("Mu puntera", f"{resultado_zapata['Mu_puntera_ton_m_m']:.3f} ton·m/m")
+            col_z3.metric("Mu talón", f"{resultado_zapata['Mu_talon_ton_m_m']:.3f} ton·m/m")
+
+            st.subheader("Presiones de contacto")
+            st.dataframe(tabla_presiones_contacto(presiones), use_container_width=True, hide_index=True)
+
+            fig_q, ax_q = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+            dibujar_presiones_contacto(ax_q, datos, geometria, presiones, mostrar_ejes=mostrar_ejes)
+            buffer_q = BytesIO()
+            fig_q.savefig(buffer_q, format="png", bbox_inches="tight")
+            buffer_q.seek(0)
+            st.image(buffer_q, width=760)
+            plt.close(fig_q)
+
+            st.subheader("Diseño preliminar de puntera y talón")
+            st.dataframe(tabla_diseno_zapata(resultado_zapata), use_container_width=True, hide_index=True)
+
+            fig_z, ax_z = plt.subplots(figsize=(8.2, 5.6), dpi=130)
+            dibujar_armado_zapata(ax_z, datos, geometria, resultado_zapata, mostrar_ejes=mostrar_ejes)
+            buffer_z = BytesIO()
+            fig_z.savefig(buffer_z, format="png", bbox_inches="tight")
+            buffer_z.seek(0)
+            st.image(buffer_z, width=760)
+            plt.close(fig_z)
+
+            st.caption(
+                "La zapata se recalcula dinámicamente con la resultante vertical, la excentricidad, "
+                "las presiones de contacto y los parámetros de materiales."
             )
 
     else:

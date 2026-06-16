@@ -1144,6 +1144,342 @@ def dibujar_armado_fuste(ax, datos: DatosMuro, geometria: dict, resultado: dict,
     ax.set_title("Armado preliminar dinámico del fuste")
 
 
+
+
+def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 180) -> dict:
+    """
+    Calcula presiones de contacto dinámicas bajo la zapata en estado de servicio.
+
+    Se sigue la lógica del PDF para equilibrio externo:
+    - se calcula el empuje activo PA;
+    - se descompone en componente horizontal y vertical;
+    - se suman pesos propios simplificados del muro y suelo sobre el talón;
+    - se calcula la posición de la resultante x desde la puntera;
+    - se obtiene la excentricidad e = B/2 - x;
+    - se calculan presiones lineales qmax y qmin.
+
+    Esta función es dinámica y cambia con geometría, suelo y materiales.
+    """
+    geometria = generar_puntos_muro(datos)
+    tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+    PA = resultado_trial["PA_ton_m"]
+    delta = math.radians(resultado_trial["delta_grados"])
+    PA_v = PA * math.sin(delta)
+    PA_h = PA * math.cos(delta)
+
+    # Pesos por metro longitudinal.
+    area_zapata = datos.B * datos.hz
+    W_zapata = area_zapata * datos.gamma_hormigon
+    x_zapata = datos.B / 2.0
+
+    area_fuste = (datos.t_base + datos.t_corona) / 2.0 * datos.H
+    W_fuste = area_fuste * datos.gamma_hormigon
+    x_fuste = datos.puntera + (datos.t_base + datos.t_corona) / 4.0
+
+    talon = calcular_talon(datos)
+    altura_suelo_talon = max(datos.altura_relleno, datos.H)
+    area_suelo_talon = talon * altura_suelo_talon
+    W_suelo_talon = area_suelo_talon * datos.gamma_suelo
+    x_suelo_talon = datos.puntera + datos.t_base + talon / 2.0
+
+    # Peso adicional aproximado por pendiente sobre el talón.
+    if datos.pendiente_v > 0:
+        pendiente = datos.pendiente_v / datos.pendiente_h
+        area_tri_pendiente = 0.5 * talon * (pendiente * talon)
+        W_pendiente = area_tri_pendiente * datos.gamma_suelo
+        x_pendiente = datos.puntera + datos.t_base + 2.0 * talon / 3.0
+    else:
+        W_pendiente = 0.0
+        x_pendiente = datos.puntera + datos.t_base + talon / 2.0
+
+    # Momento positivo estabilizador respecto a puntera inferior O.
+    V = W_zapata + W_fuste + W_suelo_talon + W_pendiente + PA_v
+    M_est = (
+        W_zapata * x_zapata
+        + W_fuste * x_fuste
+        + W_suelo_talon * x_suelo_talon
+        + W_pendiente * x_pendiente
+        + PA_v * datos.B
+    )
+
+    # Momento volcador por componente horizontal del empuje.
+    brazo_PA_h = datos.H / 3.0
+    M_volc = PA_h * brazo_PA_h
+
+    M_resultante = M_est - M_volc
+    x_resultante = M_resultante / V if V > 0 else float("nan")
+    e = datos.B / 2.0 - x_resultante
+
+    if abs(e) <= datos.B / 6.0:
+        q_prom = V / datos.B
+        q_max = q_prom * (1.0 + 6.0 * e / datos.B)
+        q_min = q_prom * (1.0 - 6.0 * e / datos.B)
+    else:
+        B_efectivo = 3.0 * (datos.B / 2.0 - abs(e))
+        q_max = 2.0 * V / B_efectivo if B_efectivo > 0 else float("nan")
+        q_min = 0.0
+
+    return {
+        "PA_ton_m": PA,
+        "PA_h_ton_m": PA_h,
+        "PA_v_ton_m": PA_v,
+        "W_zapata_ton_m": W_zapata,
+        "W_fuste_ton_m": W_fuste,
+        "W_suelo_talon_ton_m": W_suelo_talon,
+        "W_pendiente_ton_m": W_pendiente,
+        "V_total_ton_m": V,
+        "M_est_ton_m_m": M_est,
+        "M_volc_ton_m_m": M_volc,
+        "x_resultante_m": x_resultante,
+        "e_m": e,
+        "qmax_ton_m2": q_max,
+        "qmin_ton_m2": q_min,
+        "q_adm_ton_m2": datos.qa,
+        "estado_q": "OK" if q_max <= datos.qa and q_min >= 0 else "Revisar",
+        "resultado_trial": resultado_trial,
+    }
+
+
+def presion_lineal_en_x(datos: DatosMuro, presiones: dict, x: float) -> float:
+    """
+    Interpola la presión de contacto bajo la zapata en una posición x.
+
+    Convención:
+    - x = 0 en la puntera.
+    - x = B en el extremo posterior.
+    """
+    qmax = presiones["qmax_ton_m2"]
+    qmin = presiones["qmin_ton_m2"]
+    # Se asume qmax en la puntera cuando e positivo. Si e negativo, se invierte.
+    if presiones["e_m"] >= 0:
+        return qmax + (qmin - qmax) * (x / datos.B)
+    return qmin + (qmax - qmin) * (x / datos.B)
+
+
+def calcular_diseno_zapata_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0
+) -> dict:
+    """
+    Diseña dinámicamente el armado preliminar de puntera y talón.
+
+    Enfoque:
+    - Se calculan presiones de contacto dinámicas bajo la zapata.
+    - La puntera se modela como voladizo desde la cara frontal del fuste.
+    - El talón se modela como voladizo desde la cara posterior del fuste.
+    - Se obtienen momentos por metro y se calcula As por flexión.
+
+    Este módulo es preliminar, pero cambia automáticamente con geometría, suelo,
+    materiales y empuje calculado por Trial Wedge.
+    """
+    presiones = calcular_presiones_contacto_servicio(datos, numero_cunas=numero_cunas)
+
+    # Factor de carga para pasar a una demanda conservadora preliminar.
+    gamma_u = 1.50
+
+    # Puntera: carga hacia arriba por presión de suelo.
+    Lp = datos.puntera
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    q1 = presion_lineal_en_x(datos, presiones, datos.puntera)
+    q_prom_p = (q0 + q1) / 2.0
+    Mu_puntera = gamma_u * q_prom_p * Lp ** 2 / 2.0
+    Vu_puntera = gamma_u * q_prom_p * Lp
+
+    # Talón: peso de suelo sobre talón menos presión de contacto hacia arriba.
+    Lt = calcular_talon(datos)
+    x_t0 = datos.puntera + datos.t_base
+    x_t1 = datos.B
+    q_t0 = presion_lineal_en_x(datos, presiones, x_t0)
+    q_t1 = presion_lineal_en_x(datos, presiones, x_t1)
+    q_prom_t = (q_t0 + q_t1) / 2.0
+
+    altura_suelo = max(datos.altura_relleno, datos.H)
+    w_suelo_talon = datos.gamma_suelo * altura_suelo
+    if datos.pendiente_v > 0:
+        w_suelo_talon += datos.gamma_suelo * (datos.pendiente_v / datos.pendiente_h) * Lt / 2.0
+
+    w_neto_talon = max(w_suelo_talon - q_prom_t, 0.0)
+    Mu_talon = gamma_u * w_neto_talon * Lt ** 2 / 2.0
+    Vu_talon = gamma_u * w_neto_talon * Lt
+
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+
+    d_puntera_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_talon_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+
+    As_puntera = resolver_as_flexion_rectangular(
+        Mu_ton_m=Mu_puntera,
+        b_cm=b_cm,
+        d_cm=d_puntera_cm,
+        fc_kg_cm2=datos.fc,
+        fy_kg_cm2=datos.fy
+    )
+    As_talon = resolver_as_flexion_rectangular(
+        Mu_ton_m=Mu_talon,
+        b_cm=b_cm,
+        d_cm=d_talon_cm,
+        fc_kg_cm2=datos.fc,
+        fy_kg_cm2=datos.fy
+    )
+
+    As_temp_zapata = 0.0018 * b_cm * h_cm / 2.0
+
+    As_puntera_req = max(As_puntera, As_temp_zapata)
+    As_talon_req = max(As_talon, As_temp_zapata)
+
+    sep_puntera_cm, As_puntera_prov = seleccionar_separacion(
+        area_barra=area_barra_cm2(diametro_puntera_mm),
+        As_req_cm2_m=As_puntera_req,
+        separacion_max_cm=separacion_max_cm
+    )
+    sep_talon_cm, As_talon_prov = seleccionar_separacion(
+        area_barra=area_barra_cm2(diametro_talon_mm),
+        As_req_cm2_m=As_talon_req,
+        separacion_max_cm=separacion_max_cm
+    )
+
+    return {
+        "presiones": presiones,
+        "Lp_m": Lp,
+        "Lt_m": Lt,
+        "q_puntera_prom_ton_m2": q_prom_p,
+        "q_talon_prom_ton_m2": q_prom_t,
+        "w_suelo_talon_ton_m2": w_suelo_talon,
+        "w_neto_talon_ton_m2": w_neto_talon,
+        "Mu_puntera_ton_m_m": Mu_puntera,
+        "Vu_puntera_ton_m": Vu_puntera,
+        "Mu_talon_ton_m_m": Mu_talon,
+        "Vu_talon_ton_m": Vu_talon,
+        "As_temp_zapata_cm2_m": As_temp_zapata,
+        "As_puntera_flexion_cm2_m": As_puntera,
+        "As_talon_flexion_cm2_m": As_talon,
+        "As_puntera_req_cm2_m": As_puntera_req,
+        "As_talon_req_cm2_m": As_talon_req,
+        "diametro_puntera_mm": diametro_puntera_mm,
+        "diametro_talon_mm": diametro_talon_mm,
+        "sep_puntera_cm": sep_puntera_cm,
+        "sep_talon_cm": sep_talon_cm,
+        "As_puntera_prov_cm2_m": As_puntera_prov,
+        "As_talon_prov_cm2_m": As_talon_prov,
+    }
+
+
+def tabla_presiones_contacto(presiones: dict) -> pd.DataFrame:
+    """
+    Convierte el resultado de presiones de contacto en una tabla.
+    """
+    filas = [
+        ("PA", presiones["PA_ton_m"], "ton/m"),
+        ("PA horizontal", presiones["PA_h_ton_m"], "ton/m"),
+        ("PA vertical", presiones["PA_v_ton_m"], "ton/m"),
+        ("V total", presiones["V_total_ton_m"], "ton/m"),
+        ("M estabilizador", presiones["M_est_ton_m_m"], "ton·m/m"),
+        ("M volcador", presiones["M_volc_ton_m_m"], "ton·m/m"),
+        ("x resultante", presiones["x_resultante_m"], "m"),
+        ("excentricidad e", presiones["e_m"], "m"),
+        ("qmax", presiones["qmax_ton_m2"], "ton/m²"),
+        ("qmin", presiones["qmin_ton_m2"], "ton/m²"),
+        ("qa", presiones["q_adm_ton_m2"], "ton/m²"),
+        ("Estado", presiones["estado_q"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Parámetro", "Valor", "Unidad"])
+
+
+def tabla_diseno_zapata(resultado: dict) -> pd.DataFrame:
+    """
+    Convierte el diseño preliminar de puntera y talón en tabla.
+    """
+    filas = [
+        ("Longitud puntera", resultado["Lp_m"], "m"),
+        ("Longitud talón", resultado["Lt_m"], "m"),
+        ("q promedio puntera", resultado["q_puntera_prom_ton_m2"], "ton/m²"),
+        ("q promedio talón", resultado["q_talon_prom_ton_m2"], "ton/m²"),
+        ("w suelo talón", resultado["w_suelo_talon_ton_m2"], "ton/m²"),
+        ("w neto talón", resultado["w_neto_talon_ton_m2"], "ton/m²"),
+        ("Mu puntera", resultado["Mu_puntera_ton_m_m"], "ton·m/m"),
+        ("Mu talón", resultado["Mu_talon_ton_m_m"], "ton·m/m"),
+        ("As puntera requerido", resultado["As_puntera_req_cm2_m"], "cm²/m"),
+        ("As puntera provisto", resultado["As_puntera_prov_cm2_m"], "cm²/m"),
+        ("Separación puntera", resultado["sep_puntera_cm"], "cm"),
+        ("As talón requerido", resultado["As_talon_req_cm2_m"], "cm²/m"),
+        ("As talón provisto", resultado["As_talon_prov_cm2_m"], "cm²/m"),
+        ("Separación talón", resultado["sep_talon_cm"], "cm"),
+    ]
+    return pd.DataFrame(filas, columns=["Parámetro", "Valor", "Unidad"])
+
+
+def dibujar_presiones_contacto(ax, datos: DatosMuro, geometria: dict, presiones: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja la distribución lineal de presiones de contacto bajo la zapata.
+    """
+    dibujar_muro(ax, datos, geometria, tamano_texto=8, mostrar_cotas=False, mostrar_ejes=mostrar_ejes)
+
+    qmax = presiones["qmax_ton_m2"]
+    qmin = presiones["qmin_ton_m2"]
+    escala = max(datos.hz * 1.80 / max(qmax, qmin, 1e-6), 0.02)
+
+    if presiones["e_m"] >= 0:
+        y0 = -datos.hz - qmax * escala
+        y1 = -datos.hz - qmin * escala
+    else:
+        y0 = -datos.hz - qmin * escala
+        y1 = -datos.hz - qmax * escala
+
+    pol = Polygon(
+        [(0, -datos.hz), (datos.B, -datos.hz), (datos.B, y1), (0, y0)],
+        closed=True,
+        fill=False,
+        linewidth=2.0,
+        linestyle="--"
+    )
+    ax.add_patch(pol)
+
+    ax.text(0, y0, f"q = {qmax:.2f}", fontsize=8, ha="left", va="top")
+    ax.text(datos.B, y1, f"q = {qmin:.2f}", fontsize=8, ha="right", va="top")
+    ax.set_title("Presiones de contacto bajo la zapata")
+
+
+def dibujar_armado_zapata(ax, datos: DatosMuro, geometria: dict, resultado: dict, mostrar_ejes: bool = True):
+    """
+    Dibuja un esquema didáctico del armado de puntera y talón.
+    """
+    dibujar_muro(ax, datos, geometria, tamano_texto=8, mostrar_cotas=False, mostrar_ejes=mostrar_ejes)
+
+    y_inf = -datos.hz + 0.08
+    y_sup = -0.08
+
+    # Acero inferior puntera.
+    ax.plot([0.10, datos.puntera - 0.08], [y_inf, y_inf], linewidth=2.5)
+    ax.text(
+        datos.puntera / 2,
+        y_inf - 0.18,
+        f"Puntera inf.: Ø{resultado['diametro_puntera_mm']:.0f} @ {resultado['sep_puntera_cm']:.1f} cm",
+        fontsize=8,
+        ha="center",
+        va="top"
+    )
+
+    # Acero superior talón.
+    x0 = datos.puntera + datos.t_base + 0.08
+    x1 = datos.B - 0.10
+    ax.plot([x0, x1], [y_sup, y_sup], linewidth=2.5)
+    ax.text(
+        (x0 + x1) / 2,
+        y_sup + 0.18,
+        f"Talón sup.: Ø{resultado['diametro_talon_mm']:.0f} @ {resultado['sep_talon_cm']:.1f} cm",
+        fontsize=8,
+        ha="center",
+        va="bottom"
+    )
+
+    ax.set_title("Armado preliminar dinámico de zapata")
+
 # Lista explícita de nombres que app.py puede importar desde este módulo.
 __all__ = [
     "DatosMuro",
@@ -1161,6 +1497,12 @@ __all__ = [
     "calcular_diseno_fuste_dinamico",
     "tabla_diseno_fuste",
     "dibujar_armado_fuste",
+    "calcular_presiones_contacto_servicio",
+    "calcular_diseno_zapata_dinamico",
+    "tabla_presiones_contacto",
+    "tabla_diseno_zapata",
+    "dibujar_presiones_contacto",
+    "dibujar_armado_zapata",
     "resumen_geometria",
     "convertir_resistencias_a_sistema_interno",
 ]
