@@ -412,3 +412,32 @@ Ahora:
 - el diseño del fuste usa una altura activa de relleno para momentos y cortantes;
 - el peso de suelo sobre el talón se calcula con un trapecio real según la línea de terreno;
 - por tanto, al modificar la altura de relleno cambian PA, momentos, cortantes, presiones de contacto y armado.
+
+
+## Corrección puntera cero
+
+Se permitió ingresar `Longitud de puntera = 0.00 m`.
+
+Antes la interfaz tenía `min_value=0.10`, por eso Streamlit impedía colocar cero. Esa restricción era una decisión de interfaz para evitar geometrías degeneradas, pero no es obligatorio que un muro tenga puntera frontal.
+
+Con esta corrección:
+
+- la puntera puede ser 0.00 m;
+- se mantiene la validación de que no sea negativa;
+- el talón debe seguir siendo positivo para que exista zapata hacia el relleno;
+- los cálculos y gráficos se mantienen dinámicos.
+
+
+## Revisión general solicitada
+
+Se corrigieron/ajustaron los puntos observados:
+
+- `altura_relleno` ahora modifica el gráfico y los cálculos.
+- `puntera = 0.00 m` está permitida.
+- La tabla de momentos separa explícitamente la zapata en puntera, zona bajo fuste y talón.
+- El fuste ya no muestra `nan`; si la sección no alcanza se indica `No cumple`.
+- El talón ya no se fuerza a momento cero: se usa carga neta firmada y se diseña con el valor absoluto del momento.
+- Se quitaron las tarjetas de anclaje de puntera y talón del dashboard.
+- La tabla de zapata ya no usa anclaje como estado global.
+- En cortante de puntera/talón, si no existe sección crítica porque L≤d, se indica `No aplica` en lugar de mostrar un OK engañoso con Vu/φVc = 0.
+- El valor de φVc del fuste depende del peralte efectivo d, por lo que cambia al modificar el espesor de base del fuste.

@@ -29,7 +29,7 @@ st.sidebar.header("Geometría principal del muro")
 H = st.sidebar.number_input("Altura del fuste H [m]", min_value=0.50, value=4.00, step=0.10)
 B = st.sidebar.number_input("Ancho total de zapata B [m]", min_value=0.50, value=5.79, step=0.10)
 hz = st.sidebar.number_input("Espesor de zapata hz [m]", min_value=0.10, value=0.61, step=0.05)
-puntera = st.sidebar.number_input("Longitud de puntera [m]", min_value=0.10, value=1.68, step=0.05)
+puntera = st.sidebar.number_input("Longitud de puntera [m]", min_value=0.00, value=1.68, step=0.05)
 t_base = st.sidebar.number_input("Espesor del fuste en la base [m]", min_value=0.10, value=0.72, step=0.05)
 t_corona = st.sidebar.number_input("Espesor del fuste en la corona [m]", min_value=0.10, value=0.29, step=0.01)
 
@@ -54,7 +54,7 @@ modo_dentellon = st.sidebar.selectbox(
 )
 
 pos_bajo_pantalla = puntera + t_base / 2.0
-talon_tmp = B - puntera - t_base
+talon_tmp = max(B - puntera - t_base, 0.0)
 pos_pdf_talon = min(max(puntera + t_base + 0.70 * talon_tmp, ancho_llave / 2.0), B - ancho_llave / 2.0)
 
 if modo_dentellon == "Bajo pantalla":
@@ -66,7 +66,7 @@ elif modo_dentellon == "Según PDF / hacia talón":
 else:
     pos_llave = st.sidebar.number_input(
         "Posición del eje del dentellón desde el borde frontal [m]",
-        min_value=0.10,
+        min_value=0.00,
         value=4.27,
         step=0.05,
         disabled=not usar_llave
@@ -287,7 +287,7 @@ with col_der:
                         "Grupo": "Zapata",
                         "Verificación": "Estado global de zapata",
                         "Estado": resultado_zapata_inicio["estado_global_zapata"],
-                        "Detalle": "Incluye flexión, cortante, presión de contacto y anclaje.",
+                        "Detalle": "Incluye flexión, cortante y presión de contacto. No se califica anclaje en dashboard.",
                     },
                     {
                         "Grupo": "Zapata",
@@ -300,18 +300,6 @@ with col_der:
                         "Verificación": "Cortante talón",
                         "Estado": resultado_zapata_inicio["cortante_talon"]["estado"],
                         "Detalle": f"Vu/φVc = {resultado_zapata_inicio['cortante_talon']['relacion']:.2f}",
-                    },
-                    {
-                        "Grupo": "Zapata",
-                        "Verificación": "Anclaje puntera",
-                        "Estado": resultado_zapata_inicio["estado_ld_puntera"],
-                        "Detalle": f"ld = {resultado_zapata_inicio['ld_puntera_cm']:.1f} cm / disp. = {resultado_zapata_inicio['longitud_disponible_puntera_cm']:.1f} cm",
-                    },
-                    {
-                        "Grupo": "Zapata",
-                        "Verificación": "Anclaje talón",
-                        "Estado": resultado_zapata_inicio["estado_ld_talon"],
-                        "Detalle": f"ld = {resultado_zapata_inicio['ld_talon_cm']:.1f} cm / disp. = {resultado_zapata_inicio['longitud_disponible_talon_cm']:.1f} cm",
                     },
                     {
                         "Grupo": "Dentellón",

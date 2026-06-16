@@ -69,8 +69,8 @@ def validar_datos_muro(datos: DatosMuro) -> list[str]:
         errores.append("El espesor del fuste en la corona debe ser mayor que cero.")
     if datos.t_corona > datos.t_base:
         errores.append("El espesor de corona no debería ser mayor que el espesor de base.")
-    if datos.puntera <= 0:
-        errores.append("La puntera debe ser mayor que cero.")
+    if datos.puntera < 0:
+        errores.append("La puntera no puede ser negativa.")
     if talon <= 0:
         errores.append("La suma puntera + espesor del fuste en la base no puede superar el ancho total de zapata.")
     if datos.altura_relleno < 0:
@@ -3002,3 +3002,605 @@ __all__ = [
     "dibujar_detalle_pantalla_frontal",
     "tabla_resumen_armado_dentellon",
 ]
+
+
+# =============================================================================
+# OVERRIDES DE REVISIÓN GENERAL
+# Estas funciones corrigen el manejo de altura de relleno, puntera cero,
+# diseño de fuste/zapata y reportes solicitados por el usuario.
+# =============================================================================
+
+def calcular_y_terreno(datos: DatosMuro, geometria: dict, x: float) -> float:
+    """
+    Elevación de la superficie del relleno.
+
+    La línea del relleno parte desde `altura_relleno`, no desde la corona del muro.
+    Así, cambiar altura_relleno modifica el dibujo y todos los cálculos que usan
+    Trial Wedge, pesos de suelo y momentos.
+    """
+    x0 = geometria["x_dorso_fuste_corona"]
+    y0 = datos.altura_relleno
+    if datos.pendiente_v == 0:
+        return y0
+    pendiente = datos.pendiente_v / datos.pendiente_h
+    return y0 + pendiente * max(x - x0, 0.0)
+
+
+def calcular_linea_relleno(datos: DatosMuro, geometria: dict) -> list[tuple[float, float]]:
+    """
+    Línea del relleno para el dibujo. Parte desde la altura real ingresada.
+    """
+    x_inicio = geometria["x_dorso_fuste_corona"]
+    y_inicio = datos.altura_relleno
+    x_fin = datos.B + max(datos.B * 0.60, 1.00)
+    y_fin = calcular_y_terreno(datos, geometria, x_fin)
+    return [(x_inicio, y_inicio), (x_fin, y_fin)]
+
+
+def altura_relleno_en_muro(datos: DatosMuro, geometria: dict) -> float:
+    """
+    Altura de suelo retenido directamente contra el fuste.
+    Para el diseño local del fuste se limita al alto del fuste.
+    """
+    return max(0.0, min(datos.altura_relleno, datos.H))
+
+
+def suelo_sobre_talon(datos: DatosMuro, geometria: dict) -> dict:
+    """
+    Peso de suelo sobre el talón usando la línea real del terreno.
+    """
+    talon = calcular_talon(datos)
+    if talon <= 0:
+        return {"area_m2": 0.0, "W_ton_m": 0.0, "x_centroide_m": datos.B, "h_inicio_m": 0.0, "h_fin_m": 0.0}
+
+    x1 = datos.puntera + datos.t_base
+    x2 = datos.B
+    h1 = max(calcular_y_terreno(datos, geometria, x1), 0.0)
+    h2 = max(calcular_y_terreno(datos, geometria, x2), 0.0)
+
+    area = talon * (h1 + h2) / 2.0
+    W = area * datos.gamma_suelo
+
+    if h1 + h2 > 0:
+        x_rel = talon * (h1 + 2.0 * h2) / (3.0 * (h1 + h2))
+        x_c = x1 + x_rel
+    else:
+        x_c = x1 + talon / 2.0
+
+    return {"area_m2": area, "W_ton_m": W, "x_centroide_m": x_c, "h_inicio_m": h1, "h_fin_m": h2}
+
+
+def resolver_as_flexion_rectangular(Mu_ton_m: float, b_cm: float, d_cm: float, fc_kg_cm2: float, fy_kg_cm2: float, phi_flexion: float = 0.90) -> float:
+    """
+    Calcula As por flexión. Si la sección no puede resistir el momento con acero
+    simple razonable, devuelve inf en vez de nan para evitar salidas confusas.
+    """
+    if Mu_ton_m <= 0:
+        return 0.0
+    if b_cm <= 0 or d_cm <= 0 or fc_kg_cm2 <= 0 or fy_kg_cm2 <= 0:
+        return float("inf")
+
+    Mu_kg_cm = Mu_ton_m * 100000.0
+    A = phi_flexion * fy_kg_cm2 ** 2 / (2.0 * 0.85 * fc_kg_cm2 * b_cm)
+    Bq = -phi_flexion * fy_kg_cm2 * d_cm
+    C = Mu_kg_cm
+    disc = Bq ** 2 - 4.0 * A * C
+    if disc < 0:
+        return float("inf")
+    r1 = (-Bq - math.sqrt(disc)) / (2.0 * A)
+    r2 = (-Bq + math.sqrt(disc)) / (2.0 * A)
+    candidatos = [r for r in [r1, r2] if r > 0 and math.isfinite(r)]
+    return min(candidatos) if candidatos else float("inf")
+
+
+def seleccionar_separacion(area_barra: float, As_req_cm2_m: float, separacion_max_cm: float = 30.0) -> tuple[float, float]:
+    """
+    Selecciona separación comercial. Si As_req es infinito, devuelve inf y obliga revisión.
+    """
+    if As_req_cm2_m <= 0:
+        return float("nan"), 0.0
+    if not math.isfinite(As_req_cm2_m):
+        return float("inf"), 0.0
+
+    separacion_teorica = area_barra * 100.0 / As_req_cm2_m
+    separaciones_comerciales = [40, 35, 30, 25, 20, 18, 15, 12.5, 10, 7.5]
+    separaciones_validas = [s for s in separaciones_comerciales if s <= separacion_teorica and s <= separacion_max_cm]
+    if not separaciones_validas:
+        separacion = min(separaciones_comerciales)
+    else:
+        separacion = max(separaciones_validas)
+    return separacion, area_barra * 100.0 / separacion
+
+
+def _estado_acero(As_req: float, As_prov: float) -> str:
+    if not math.isfinite(As_req):
+        return "No cumple: aumentar sección/refuerzo"
+    if As_req <= 0:
+        return "No aplica"
+    return "OK" if As_prov >= As_req else "No cumple"
+
+
+def calcular_diseno_fuste_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_vertical_mm: float = 16.0,
+    diametro_horizontal_mm: float = 12.0,
+    separacion_max_cm: float = 30.0
+) -> dict:
+    """
+    Diseño dinámico del fuste corregido.
+
+    La altura de relleno ingresada controla PA, Mu y Vu. Si altura_relleno < H,
+    el empuje local del fuste no se aplica con brazo H/3 sino con h_activa/3.
+    """
+    geometria = generar_puntos_muro(datos)
+    tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+    PA = resultado_trial["PA_ton_m"]
+    delta_rad = math.radians(resultado_trial["delta_grados"])
+    PA_h = PA * math.cos(delta_rad)
+
+    h_activa = altura_relleno_en_muro(datos, geometria)
+    brazo = h_activa / 3.0 if h_activa > 0 else 0.0
+
+    gamma_p = 1.50
+    Mu_ton_m = gamma_p * PA_h * brazo
+    Vu_ton = gamma_p * PA_h
+
+    b_cm = 100.0
+    h_cm = datos.t_base * 100.0
+    d_cm = max(h_cm - recubrimiento_cm - (diametro_vertical_mm / 10.0) / 2.0, 1.0)
+
+    As_flexion = resolver_as_flexion_rectangular(Mu_ton_m, b_cm, d_cm, datos.fc, datos.fy)
+    As_temp_total = 0.0018 * b_cm * h_cm
+    As_temp_cara = As_temp_total / 2.0
+
+    if math.isfinite(As_flexion):
+        As_vertical_req = max(As_flexion, As_temp_cara)
+    else:
+        As_vertical_req = float("inf")
+
+    sep_vertical_cm, As_vertical_prov = seleccionar_separacion(
+        area_barra_cm2(diametro_vertical_mm), As_vertical_req, separacion_max_cm
+    )
+
+    As_horizontal_req = As_temp_cara
+    sep_horizontal_cm, As_horizontal_prov = seleccionar_separacion(
+        area_barra_cm2(diametro_horizontal_mm), As_horizontal_req, separacion_max_cm
+    )
+
+    # Cortante del fuste: si el espesor aumenta, d aumenta y φVc cambia.
+    cort = verificar_cortante_rectangular(Vu_ton, b_cm, d_cm, datos.fc)
+    estado_cortante = cort["estado"]
+
+    q_base_ton_m2 = PA_h / h_activa if h_activa > 0 else 0.0
+    estado_flexion = _estado_acero(As_vertical_req, As_vertical_prov)
+
+    return {
+        "PA_ton_m": PA,
+        "delta_grados": resultado_trial["delta_grados"],
+        "alfa_critico_grados": resultado_trial.get("alfa_grados", resultado_trial.get("alfa_critico_grados", 0.0)),
+        "q_base_ton_m2": q_base_ton_m2,
+        "altura_activa_relleno_m": h_activa,
+        "brazo_activo_m": brazo,
+        "Mu_ton_m_m": Mu_ton_m,
+        "Vu_ton_m": Vu_ton,
+        "b_cm": b_cm,
+        "h_cm": h_cm,
+        "d_cm": d_cm,
+        "As_flexion_cm2_m": As_flexion,
+        "As_temp_total_cm2_m": As_temp_total,
+        "As_temp_cara_cm2_m": As_temp_cara,
+        "As_vertical_req_cm2_m": As_vertical_req,
+        "diametro_vertical_mm": diametro_vertical_mm,
+        "separacion_vertical_cm": sep_vertical_cm,
+        "As_vertical_prov_cm2_m": As_vertical_prov,
+        "diametro_horizontal_mm": diametro_horizontal_mm,
+        "As_horizontal_req_cm2_m": As_horizontal_req,
+        "separacion_horizontal_cm": sep_horizontal_cm,
+        "As_horizontal_prov_cm2_m": As_horizontal_prov,
+        "phi_Vc_ton_m": cort["phi_Vc_ton_m"],
+        "relacion_cortante": cort["relacion"],
+        "estado_cortante": estado_cortante,
+        "estado_flexion": estado_flexion,
+        "tabla_trial": tabla_trial,
+        "resultado_trial": resultado_trial,
+    }
+
+
+def _formato_armado(diametro: float, sep: float) -> str:
+    if not math.isfinite(sep):
+        return "No cumple"
+    if sep <= 0 or math.isnan(sep):
+        return "No aplica"
+    return f"Ø{diametro:.0f} @ {sep:.1f} cm"
+
+
+def calcular_presiones_contacto_servicio(datos: DatosMuro, numero_cunas: int = 180) -> dict:
+    """
+    Equilibrio externo corregido.
+
+    Se separan los pesos de puntera, zona bajo fuste y talón para que la tabla de
+    momentos muestre explícitamente la contribución de la puntera.
+    """
+    geometria = generar_puntos_muro(datos)
+    tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+    PA = resultado_trial["PA_ton_m"]
+    delta = math.radians(resultado_trial["delta_grados"])
+    PA_v = PA * math.sin(delta)
+    PA_h = PA * math.cos(delta)
+
+    # Pesos de zapata separados.
+    L_puntera = max(datos.puntera, 0.0)
+    L_bajo_fuste = max(datos.t_base, 0.0)
+    L_talon = max(calcular_talon(datos), 0.0)
+
+    W_zapata_puntera = L_puntera * datos.hz * datos.gamma_hormigon
+    x_zapata_puntera = L_puntera / 2.0 if L_puntera > 0 else 0.0
+
+    W_zapata_fuste = L_bajo_fuste * datos.hz * datos.gamma_hormigon
+    x_zapata_fuste = datos.puntera + L_bajo_fuste / 2.0
+
+    W_zapata_talon = L_talon * datos.hz * datos.gamma_hormigon
+    x_zapata_talon = datos.puntera + datos.t_base + L_talon / 2.0 if L_talon > 0 else datos.B
+
+    W_zapata = W_zapata_puntera + W_zapata_fuste + W_zapata_talon
+    x_zapata = (
+        W_zapata_puntera * x_zapata_puntera
+        + W_zapata_fuste * x_zapata_fuste
+        + W_zapata_talon * x_zapata_talon
+    ) / W_zapata if W_zapata > 0 else 0.0
+
+    area_fuste = (datos.t_base + datos.t_corona) / 2.0 * datos.H
+    W_fuste = area_fuste * datos.gamma_hormigon
+    x_fuste = datos.puntera + (datos.t_base + datos.t_corona) / 4.0
+
+    if datos.usar_llave:
+        W_dentellon = datos.ancho_llave * datos.profundidad_llave * datos.gamma_hormigon
+        x_dentellon = datos.pos_llave
+    else:
+        W_dentellon = 0.0
+        x_dentellon = 0.0
+
+    suelo_talon = suelo_sobre_talon(datos, geometria)
+    W_suelo_talon = suelo_talon["W_ton_m"]
+    x_suelo_talon = suelo_talon["x_centroide_m"]
+
+    W_pendiente = 0.0
+    x_pendiente = x_suelo_talon
+
+    M_est_zapata_puntera = W_zapata_puntera * x_zapata_puntera
+    M_est_zapata_fuste = W_zapata_fuste * x_zapata_fuste
+    M_est_zapata_talon = W_zapata_talon * x_zapata_talon
+    M_est_zapata = M_est_zapata_puntera + M_est_zapata_fuste + M_est_zapata_talon
+    M_est_fuste = W_fuste * x_fuste
+    M_est_dentellon = W_dentellon * x_dentellon
+    M_est_suelo_talon = W_suelo_talon * x_suelo_talon
+    M_est_pendiente = 0.0
+    M_est_PA_v = PA_v * datos.B
+
+    V = W_zapata + W_fuste + W_dentellon + W_suelo_talon + W_pendiente + PA_v
+    M_est = M_est_zapata + M_est_fuste + M_est_dentellon + M_est_suelo_talon + M_est_PA_v
+
+    h_activa = altura_relleno_en_muro(datos, geometria)
+    brazo_PA_h = h_activa / 3.0 if h_activa > 0 else 0.0
+    M_volc_PA_h = PA_h * brazo_PA_h
+    M_volc = M_volc_PA_h
+
+    M_resultante = M_est - M_volc
+    x_resultante = M_resultante / V if V > 0 else float("nan")
+    e = datos.B / 2.0 - x_resultante
+
+    if abs(e) <= datos.B / 6.0:
+        q_prom = V / datos.B
+        q_max = q_prom * (1.0 + 6.0 * e / datos.B)
+        q_min = q_prom * (1.0 - 6.0 * e / datos.B)
+    else:
+        B_efectivo = 3.0 * (datos.B / 2.0 - abs(e))
+        q_max = 2.0 * V / B_efectivo if B_efectivo > 0 else float("inf")
+        q_min = 0.0
+
+    estado_q = "OK" if math.isfinite(q_max) and q_max <= datos.qa else "No cumple"
+
+    return {
+        "PA_ton_m": PA,
+        "PA_h_ton_m": PA_h,
+        "PA_v_ton_m": PA_v,
+        "delta_grados": resultado_trial["delta_grados"],
+        "V_total_ton_m": V,
+        "M_est_ton_m_m": M_est,
+        "M_volc_ton_m_m": M_volc,
+        "M_resultante_ton_m_m": M_resultante,
+        "x_resultante_m": x_resultante,
+        "e_m": e,
+        "qmax_ton_m2": q_max,
+        "qmin_ton_m2": q_min,
+        "q_adm_ton_m2": datos.qa,
+        "estado_q": estado_q,
+
+        "W_zapata_ton_m": W_zapata,
+        "x_zapata_m": x_zapata,
+        "M_est_zapata_ton_m_m": M_est_zapata,
+        "W_zapata_puntera_ton_m": W_zapata_puntera,
+        "x_zapata_puntera_m": x_zapata_puntera,
+        "M_est_zapata_puntera_ton_m_m": M_est_zapata_puntera,
+        "W_zapata_fuste_ton_m": W_zapata_fuste,
+        "x_zapata_fuste_m": x_zapata_fuste,
+        "M_est_zapata_fuste_ton_m_m": M_est_zapata_fuste,
+        "W_zapata_talon_ton_m": W_zapata_talon,
+        "x_zapata_talon_m": x_zapata_talon,
+        "M_est_zapata_talon_ton_m_m": M_est_zapata_talon,
+
+        "W_fuste_ton_m": W_fuste,
+        "x_fuste_m": x_fuste,
+        "M_est_fuste_ton_m_m": M_est_fuste,
+        "W_dentellon_ton_m": W_dentellon,
+        "x_dentellon_m": x_dentellon,
+        "M_est_dentellon_ton_m_m": M_est_dentellon,
+        "W_suelo_talon_ton_m": W_suelo_talon,
+        "x_suelo_talon_m": x_suelo_talon,
+        "M_est_suelo_talon_ton_m_m": M_est_suelo_talon,
+        "area_suelo_talon_m2": suelo_talon["area_m2"],
+        "h_suelo_talon_inicio_m": suelo_talon["h_inicio_m"],
+        "h_suelo_talon_fin_m": suelo_talon["h_fin_m"],
+        "W_pendiente_ton_m": W_pendiente,
+        "x_pendiente_m": x_pendiente,
+        "M_est_pendiente_ton_m_m": M_est_pendiente,
+        "M_est_PA_v_ton_m_m": M_est_PA_v,
+        "brazo_PA_h_m": brazo_PA_h,
+        "M_volc_PA_h_ton_m_m": M_volc_PA_h,
+    }
+
+
+def calcular_diseno_zapata_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0
+) -> dict:
+    """
+    Diseño preliminar de zapata corregido.
+
+    El talón se diseña con carga neta firmada: peso de suelo hacia abajo menos
+    reacción de suelo hacia arriba. Para flexión se usa el valor absoluto del
+    momento para no reportar Mu=0 cuando realmente hay inversión de signo.
+    """
+    presiones = calcular_presiones_contacto_servicio(datos, numero_cunas=numero_cunas)
+    gamma_u = 1.50
+
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+
+    # Puntera
+    Lp = max(datos.puntera, 0.0)
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    q1 = presion_lineal_en_x(datos, presiones, datos.puntera)
+    q_prom_p = (q0 + q1) / 2.0 if Lp > 0 else 0.0
+    Mu_puntera = gamma_u * q_prom_p * Lp ** 2 / 2.0
+    Vu_puntera = gamma_u * q_prom_p * Lp
+
+    # Talón
+    Lt = max(calcular_talon(datos), 0.0)
+    x_t0 = datos.puntera + datos.t_base
+    x_t1 = datos.B
+    q_t0 = presion_lineal_en_x(datos, presiones, x_t0)
+    q_t1 = presion_lineal_en_x(datos, presiones, x_t1)
+    q_prom_t = (q_t0 + q_t1) / 2.0 if Lt > 0 else 0.0
+
+    geom = generar_puntos_muro(datos)
+    soil = suelo_sobre_talon(datos, geom)
+    w_suelo_prom = soil["W_ton_m"] / Lt if Lt > 0 else 0.0
+    w_neto_talon = w_suelo_prom - q_prom_t
+
+    Mu_talon_firmado = gamma_u * w_neto_talon * Lt ** 2 / 2.0
+    Vu_talon_firmado = gamma_u * w_neto_talon * Lt
+    Mu_talon = abs(Mu_talon_firmado)
+    Vu_talon = abs(Vu_talon_firmado)
+
+    d_puntera_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_talon_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+
+    As_puntera = resolver_as_flexion_rectangular(Mu_puntera, b_cm, d_puntera_cm, datos.fc, datos.fy) if Lp > 0 else 0.0
+    As_talon = resolver_as_flexion_rectangular(Mu_talon, b_cm, d_talon_cm, datos.fc, datos.fy) if Lt > 0 else 0.0
+
+    As_temp_zapata = 0.0018 * b_cm * h_cm / 2.0
+    As_puntera_req = max(As_puntera, As_temp_zapata) if Lp > 0 else 0.0
+    As_talon_req = max(As_talon, As_temp_zapata) if Lt > 0 else 0.0
+
+    sep_puntera_cm, As_puntera_prov = seleccionar_separacion(
+        area_barra_cm2(diametro_puntera_mm), As_puntera_req, separacion_max_cm
+    )
+    sep_talon_cm, As_talon_prov = seleccionar_separacion(
+        area_barra_cm2(diametro_talon_mm), As_talon_req, separacion_max_cm
+    )
+
+    return {
+        "presiones": presiones,
+        "Lp_m": Lp,
+        "Lt_m": Lt,
+        "q_puntera_prom_ton_m2": q_prom_p,
+        "q_talon_prom_ton_m2": q_prom_t,
+        "w_suelo_talon_ton_m2": w_suelo_prom,
+        "w_neto_talon_ton_m2": w_neto_talon,
+        "Mu_puntera_ton_m_m": Mu_puntera,
+        "Vu_puntera_ton_m": Vu_puntera,
+        "Mu_talon_ton_m_m": Mu_talon,
+        "Mu_talon_firmado_ton_m_m": Mu_talon_firmado,
+        "Vu_talon_ton_m": Vu_talon,
+        "Vu_talon_firmado_ton_m": Vu_talon_firmado,
+        "As_puntera_req_cm2_m": As_puntera_req,
+        "As_puntera_prov_cm2_m": As_puntera_prov,
+        "sep_puntera_cm": sep_puntera_cm,
+        "As_talon_req_cm2_m": As_talon_req,
+        "As_talon_prov_cm2_m": As_talon_prov,
+        "sep_talon_cm": sep_talon_cm,
+        "diametro_puntera_mm": diametro_puntera_mm,
+        "diametro_talon_mm": diametro_talon_mm,
+    }
+
+
+def _cortante_o_no_aplica(Vu: float, b_cm: float, d_cm: float, fc: float, longitud_crit: float, etiqueta: str) -> dict:
+    if longitud_crit <= 1e-9:
+        return {
+            "Vu_ton_m": 0.0,
+            "phi_Vc_ton_m": verificar_cortante_rectangular(0.0, b_cm, d_cm, fc)["phi_Vc_ton_m"],
+            "relacion": 0.0,
+            "estado": f"No aplica ({etiqueta} ≤ d)"
+        }
+    return verificar_cortante_rectangular(Vu, b_cm, d_cm, fc)
+
+
+def calcular_diseno_zapata_definitivo(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0
+) -> dict:
+    """
+    Diseño de zapata corregido.
+
+    Se eliminan las verificaciones automáticas de anclaje puntera/talón como
+    estado del diseño, porque son detalles de desarrollo que deben resolverse
+    con ganchos/continuidad y no deben aparecer como semáforo global.
+    """
+    res = calcular_diseno_zapata_dinamico(
+        datos, numero_cunas, recubrimiento_cm, diametro_puntera_mm, diametro_talon_mm, separacion_max_cm
+    )
+    presiones = res["presiones"]
+
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+    d_puntera_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_talon_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+    d_puntera_m = d_puntera_cm / 100.0
+    d_talon_m = d_talon_cm / 100.0
+    gamma_u = 1.50
+
+    Lp = max(datos.puntera, 0.0)
+    Lp_crit = max(Lp - d_puntera_m, 0.0)
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    qcrit_p = presion_lineal_en_x(datos, presiones, Lp_crit)
+    q_prom_crit_p = (q0 + qcrit_p) / 2.0 if Lp_crit > 0 else 0.0
+    Vu_puntera_crit = gamma_u * q_prom_crit_p * Lp_crit
+    cortante_puntera = _cortante_o_no_aplica(Vu_puntera_crit, b_cm, d_puntera_cm, datos.fc, Lp_crit, "Lp")
+
+    Lt = max(calcular_talon(datos), 0.0)
+    Lt_crit = max(Lt - d_talon_m, 0.0)
+    x_inicio_talon_crit = datos.puntera + datos.t_base + d_talon_m
+    x_fin_talon = datos.B
+    q_tcrit = presion_lineal_en_x(datos, presiones, x_inicio_talon_crit)
+    q_tfin = presion_lineal_en_x(datos, presiones, x_fin_talon)
+    q_prom_tcrit = (q_tcrit + q_tfin) / 2.0 if Lt_crit > 0 else 0.0
+
+    geom = generar_puntos_muro(datos)
+    soil = suelo_sobre_talon(datos, geom)
+    w_suelo_prom = soil["W_ton_m"] / Lt if Lt > 0 else 0.0
+    w_neto = w_suelo_prom - q_prom_tcrit
+    Vu_talon_crit = gamma_u * abs(w_neto) * Lt_crit
+    cortante_talon = _cortante_o_no_aplica(Vu_talon_crit, b_cm, d_talon_cm, datos.fc, Lt_crit, "Lt")
+
+    # Estados de acero flexión
+    estado_as_puntera = _estado_acero(res["As_puntera_req_cm2_m"], res["As_puntera_prov_cm2_m"]) if Lp > 0 else "No aplica"
+    estado_as_talon = _estado_acero(res["As_talon_req_cm2_m"], res["As_talon_prov_cm2_m"]) if Lt > 0 else "No aplica"
+
+    def estado_falla(e):
+        return str(e).lower().startswith("no cumple") or "revisar" in str(e).lower()
+
+    estados = [
+        presiones["estado_q"],
+        cortante_puntera["estado"],
+        cortante_talon["estado"],
+        estado_as_puntera,
+        estado_as_talon,
+    ]
+    estado_global = "Revisar" if any(estado_falla(e) for e in estados) else "OK"
+
+    res.update({
+        "d_puntera_cm": d_puntera_cm,
+        "d_talon_cm": d_talon_cm,
+        "Lp_crit_m": Lp_crit,
+        "Lt_crit_m": Lt_crit,
+        "Vu_puntera_crit_ton_m": Vu_puntera_crit,
+        "Vu_talon_crit_ton_m": Vu_talon_crit,
+        "cortante_puntera": cortante_puntera,
+        "cortante_talon": cortante_talon,
+        "estado_as_puntera": estado_as_puntera,
+        "estado_as_talon": estado_as_talon,
+        "ld_puntera_cm": 0.0,
+        "ld_talon_cm": 0.0,
+        "longitud_disponible_puntera_cm": 0.0,
+        "longitud_disponible_talon_cm": 0.0,
+        "estado_ld_puntera": "No se evalúa en dashboard",
+        "estado_ld_talon": "No se evalúa en dashboard",
+        "estado_global_zapata": estado_global,
+    })
+    return res
+
+
+def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
+    """
+    Tabla de zapata sin cuadros de anclaje automático.
+    """
+    filas = [
+        ("Estado global zapata", resultado["estado_global_zapata"], "-"),
+        ("qmax", resultado["presiones"]["qmax_ton_m2"], "ton/m²"),
+        ("qmin", resultado["presiones"]["qmin_ton_m2"], "ton/m²"),
+        ("qa", resultado["presiones"]["q_adm_ton_m2"], "ton/m²"),
+        ("Estado presión admisible", resultado["presiones"]["estado_q"], "-"),
+
+        ("Mu puntera", resultado["Mu_puntera_ton_m_m"], "ton·m/m"),
+        ("As puntera requerido", resultado["As_puntera_req_cm2_m"], "cm²/m"),
+        ("As puntera provisto", resultado["As_puntera_prov_cm2_m"], "cm²/m"),
+        ("Armado puntera", _formato_armado(resultado["diametro_puntera_mm"], resultado["sep_puntera_cm"]), "mm @ cm"),
+        ("Estado flexión puntera", resultado.get("estado_as_puntera", "No aplica"), "-"),
+
+        ("Mu talón", resultado["Mu_talon_ton_m_m"], "ton·m/m"),
+        ("Mu talón firmado", resultado.get("Mu_talon_firmado_ton_m_m", 0.0), "ton·m/m"),
+        ("As talón requerido", resultado["As_talon_req_cm2_m"], "cm²/m"),
+        ("As talón provisto", resultado["As_talon_prov_cm2_m"], "cm²/m"),
+        ("Armado talón", _formato_armado(resultado["diametro_talon_mm"], resultado["sep_talon_cm"]), "mm @ cm"),
+        ("Estado flexión talón", resultado.get("estado_as_talon", "No aplica"), "-"),
+
+        ("Vu puntera crítico", resultado["Vu_puntera_crit_ton_m"], "ton/m"),
+        ("φVc puntera", resultado["cortante_puntera"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc puntera", resultado["cortante_puntera"]["relacion"], "-"),
+        ("Estado cortante puntera", resultado["cortante_puntera"]["estado"], "-"),
+
+        ("Vu talón crítico", resultado["Vu_talon_crit_ton_m"], "ton/m"),
+        ("φVc talón", resultado["cortante_talon"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc talón", resultado["cortante_talon"]["relacion"], "-"),
+        ("Estado cortante talón", resultado["cortante_talon"]["estado"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
+def tabla_momentos_estabilidad(presiones: dict) -> pd.DataFrame:
+    """
+    Tabla explícita de momentos, separando la zapata en puntera, bajo fuste y talón.
+    """
+    filas = [
+        ("ESTABILIZANTES", "", "", ""),
+        ("Peso zapata - puntera", presiones.get("W_zapata_puntera_ton_m", 0.0), presiones.get("x_zapata_puntera_m", 0.0), presiones.get("M_est_zapata_puntera_ton_m_m", 0.0)),
+        ("Peso zapata - bajo fuste", presiones.get("W_zapata_fuste_ton_m", 0.0), presiones.get("x_zapata_fuste_m", 0.0), presiones.get("M_est_zapata_fuste_ton_m_m", 0.0)),
+        ("Peso zapata - talón", presiones.get("W_zapata_talon_ton_m", 0.0), presiones.get("x_zapata_talon_m", 0.0), presiones.get("M_est_zapata_talon_ton_m_m", 0.0)),
+        ("Peso zapata total", presiones.get("W_zapata_ton_m", 0.0), presiones.get("x_zapata_m", 0.0), presiones.get("M_est_zapata_ton_m_m", 0.0)),
+        ("Peso fuste/pantalla", presiones.get("W_fuste_ton_m", 0.0), presiones.get("x_fuste_m", 0.0), presiones.get("M_est_fuste_ton_m_m", 0.0)),
+        ("Peso dentellón", presiones.get("W_dentellon_ton_m", 0.0), presiones.get("x_dentellon_m", 0.0), presiones.get("M_est_dentellon_ton_m_m", 0.0)),
+        ("Peso suelo sobre talón", presiones.get("W_suelo_talon_ton_m", 0.0), presiones.get("x_suelo_talon_m", 0.0), presiones.get("M_est_suelo_talon_ton_m_m", 0.0)),
+        ("Componente vertical PA", presiones.get("PA_v_ton_m", 0.0), presiones.get("B", ""), presiones.get("M_est_PA_v_ton_m_m", 0.0)),
+        ("Total estabilizante", "", "", presiones.get("M_est_ton_m_m", 0.0)),
+        ("DESESTABILIZANTES", "", "", ""),
+        ("Componente horizontal PAh", presiones.get("PA_h_ton_m", 0.0), presiones.get("brazo_PA_h_m", 0.0), presiones.get("M_volc_PA_h_ton_m_m", 0.0)),
+        ("Total desestabilizante", "", "", presiones.get("M_volc_ton_m_m", 0.0)),
+        ("RESULTANTE", "", "", ""),
+        ("M neto = M_est - M_volc", "", "", presiones.get("M_resultante_ton_m_m", 0.0)),
+        ("x resultante", "", "", presiones.get("x_resultante_m", 0.0)),
+        ("e", "", "", presiones.get("e_m", 0.0)),
+    ]
+    return pd.DataFrame(filas, columns=["Concepto", "Fuerza [ton/m]", "Brazo x o y [m]", "Momento [ton·m/m]"])
