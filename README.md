@@ -371,3 +371,11 @@ Se actualizó el gráfico del dentellón para que:
 - el estribo cerrado suba hasta el top de la zapata;
 - los aceros longitudinales también lleguen al top de la zapata;
 - cuando la profundidad del dentellón sea mayor a 0.80 m, se muestren aceros distribuidos en ambas caras laterales.
+
+
+## Ajuste visual del dentellón
+
+Se eliminó el dibujo de barras laterales como puntos dentro del dentellón. Ahora:
+- el acero mínimo longitudinal se muestra solo en los extremos de la sección;
+- el estribo cerrado sube hasta el top de la zapata;
+- si la profundidad del dentellón es mayor a 0.80 m, solo se muestra una nota indicando que debe incluirse acero adicional distribuido en las caras laterales para control de agrietamiento.
