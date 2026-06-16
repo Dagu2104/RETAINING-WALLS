@@ -1850,6 +1850,36 @@ def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
     return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
 
 
+
+def tabla_resumen_armado_dentellon(resultado: dict) -> pd.DataFrame:
+    """
+    Genera una tabla corta solo con el resumen del armado del dentellón.
+
+    Esta tabla reemplaza a la imagen de la pestaña de dentellón, para que la
+    revisión sea más limpia. Si el dentellón es pequeño, se informa que no
+    requiere armado independiente y se trata monolítico con la zapata.
+    """
+    if resultado.get("requiere_detalle_viga", False):
+        filas = [
+            ("Criterio", resultado["criterio_armado_dentellon"], "-"),
+            ("As longitudinal requerido", resultado["As_long_dentellon_req_cm2_m"], "cm²/m"),
+            ("As longitudinal provisto", resultado["As_long_dentellon_prov_cm2_m"], "cm²/m"),
+            ("Barras longitudinales", f"{resultado['n_barras_long_dentellon']}Ø{resultado['diametro_llave_mm']:.0f}", "barras"),
+            ("Estribos", f"Ø{resultado['diametro_estribo_mm']:.0f} @ {resultado['sep_estribo_dentellon_cm']:.1f}", "mm @ cm"),
+            ("Estado cortante", resultado["cortante_dentellon"]["estado"], "-"),
+            ("Estado estribos", resultado["estado_estribos_dentellon"], "-"),
+            ("Estado armado", resultado["estado_armado_dentellon"], "-"),
+        ]
+    else:
+        filas = [
+            ("Criterio", resultado["criterio_armado_dentellon"], "-"),
+            ("Requiere armado independiente", "No", "-"),
+            ("Estado", resultado["estado_armado_dentellon"], "-"),
+            ("Nota", "Se considera monolítico con la zapata.", "-"),
+        ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
 def dibujar_detalle_zapata_definitivo(ax, datos: DatosMuro, geometria: dict, resultado: dict, mostrar_ejes: bool = True):
     """
     Dibuja un esquema más completo del armado y puntos de chequeo de cortante/anclaje.
@@ -1912,6 +1942,93 @@ def coeficiente_pasivo_rankine(phi_grados: float) -> float:
 
 
 
+
+def as_min_longitudinal_aci_cm2(b_cm: float, d_cm: float, fc_kg_cm2: float, fy_kg_cm2: float) -> float:
+    """
+    Acero longitudinal mínimo tipo ACI para una sección rectangular.
+
+    Se usa como mínimo constructivo del dentellón armado.
+    As_min = max(0.25*sqrt(fc')/fy, 1.4/fy) * b * d
+    con fc' y fy en MPa, b y d en mm. Resultado en cm².
+    """
+    fc_mpa = fc_kg_cm2 * 0.0980665
+    fy_mpa = fy_kg_cm2 * 0.0980665
+    b_mm = b_cm * 10.0
+    d_mm = d_cm * 10.0
+    if fc_mpa <= 0 or fy_mpa <= 0 or b_mm <= 0 or d_mm <= 0:
+        return 0.0
+    rho_min = max(0.25 * math.sqrt(fc_mpa) / fy_mpa, 1.4 / fy_mpa)
+    return rho_min * b_mm * d_mm / 100.0
+
+
+def diseno_cortante_dentellon_aci(
+    Vu_ton_m: float,
+    b_cm: float,
+    d_cm: float,
+    fc_kg_cm2: float,
+    fy_kg_cm2: float,
+    diametro_estribo_mm: float,
+    separacion_max_usuario_cm: float,
+    separacion_max_dentellon_cm: float = 10.0,
+    phi_cortante: float = 0.75,
+    lambda_concreto: float = 1.0
+) -> dict:
+    """
+    Diseño preliminar de estribos del dentellón por cortante.
+
+    Vc = 0.17 lambda sqrt(fc') bw d
+    Vs_req = Vu/phi - Vc
+    Av/s = Vs/(fy d)
+    """
+    fc_mpa = fc_kg_cm2 * 0.0980665
+    fy_mpa = fy_kg_cm2 * 0.0980665
+    b_mm = b_cm * 10.0
+    d_mm = d_cm * 10.0
+    Av_estribo_cm2 = 2.0 * area_barra_cm2(diametro_estribo_mm)
+
+    if fc_mpa <= 0 or fy_mpa <= 0 or b_mm <= 0 or d_mm <= 0:
+        return {
+            "Vc_ton_m": 0.0, "phi_Vc_ton_m": 0.0, "Vs_req_ton_m": 0.0,
+            "Av_s_req_cm2_cm": 0.0, "Av_estribo_cm2": Av_estribo_cm2,
+            "s_calc_cm": 0.0, "s_adoptado_cm": 0.0,
+            "s_max_dentellon_cm": separacion_max_dentellon_cm,
+            "estado": "Revisar datos"
+        }
+
+    Vc_N = 0.17 * lambda_concreto * math.sqrt(fc_mpa) * b_mm * d_mm
+    Vc_ton = Vc_N / 9806.65
+    phi_Vc_ton = phi_cortante * Vc_ton
+
+    if Vu_ton_m <= phi_Vc_ton:
+        Vs_req_ton = 0.0
+        Av_s_req_cm2_cm = 0.0
+        s_calc_cm = float("inf")
+        s_adoptado = min(separacion_max_usuario_cm, separacion_max_dentellon_cm)
+        estado = "OK: estribo constructivo"
+    else:
+        Vs_req_ton = max(Vu_ton_m / phi_cortante - Vc_ton, 0.0)
+        Vs_req_N = Vs_req_ton * 9806.65
+        Av_s_req_mm2_mm = Vs_req_N / (fy_mpa * d_mm) if fy_mpa * d_mm > 0 else float("inf")
+        Av_s_req_cm2_cm = Av_s_req_mm2_mm
+        s_calc_mm = (Av_estribo_cm2 * 100.0) / Av_s_req_mm2_mm if Av_s_req_mm2_mm > 0 else float("inf")
+        s_calc_cm = s_calc_mm / 10.0
+        s_adoptado = min(s_calc_cm, separacion_max_usuario_cm, separacion_max_dentellon_cm)
+        estado = "OK" if s_adoptado <= s_calc_cm + 1e-9 else "Revisar"
+
+    return {
+        "Vc_ton_m": Vc_ton,
+        "phi_Vc_ton_m": phi_Vc_ton,
+        "Vs_req_ton_m": Vs_req_ton,
+        "Av_s_req_cm2_cm": Av_s_req_cm2_cm,
+        "Av_estribo_cm2": Av_estribo_cm2,
+        "s_calc_cm": s_calc_cm,
+        "s_adoptado_cm": s_adoptado,
+        "s_max_dentellon_cm": separacion_max_dentellon_cm,
+        "estado": estado
+    }
+
+
+
 def calcular_deslizamiento_y_llave(
     datos: DatosMuro,
     numero_cunas: int = 180,
@@ -1924,19 +2041,11 @@ def calcular_deslizamiento_y_llave(
     diametro_estribo_mm: float = 8.0
 ) -> dict:
     """
-    Calcula dinámicamente el deslizamiento, resistencia pasiva y, si aplica,
-    un detalle constructivo del dentellón.
+    Calcula deslizamiento, resistencia pasiva y diseño del dentellón.
 
-    Criterio corregido:
-    - El PDF no diseña un armado independiente del dentellón; lo usa para
-      resistencia pasiva y lo incluye como peso propio dentro de la zapata/talón.
-    - Si el dentellón es pequeño, se considera monolítico con la zapata y no se
-      fuerza un diseño independiente.
-    - Si el dentellón es profundo, se entrega un detalle constructivo tipo viga
-      corrida: barras longitudinales a lo largo del muro + estribos cerrados.
-    - Ya NO se revisa una longitud de desarrollo vertical con la profundidad del
-      dentellón, porque esa revisión no corresponde a las barras longitudinales
-      que van acostadas a lo largo del muro.
+    Criterio:
+    - Dentellón pequeño: monolítico con zapata, sin armado independiente.
+    - Dentellón armado: llave de corte. Longitudinal mínimo ACI y estribos por cortante.
     """
     presiones = calcular_presiones_contacto_servicio(datos, numero_cunas=numero_cunas)
 
@@ -1944,11 +2053,9 @@ def calcular_deslizamiento_y_llave(
     V_total = presiones["V_total_ton_m"]
     H_actuante = factor_carga_empuje * PA_h
 
-    # 1) Deslizamiento
     R_friccion_nominal = datos.mu * V_total
     R_friccion_diseno = factor_resistencia_friccion * R_friccion_nominal
 
-    # 2) Resistencia pasiva
     Kp = coeficiente_pasivo_rankine(datos.phi)
     altura_pasiva_zapata = datos.hz
     altura_pasiva_total = datos.hz + (datos.profundidad_llave if datos.usar_llave else 0.0)
@@ -1962,92 +2069,59 @@ def calcular_deslizamiento_y_llave(
     FS_deslizamiento = R_total / H_actuante if H_actuante > 0 else float("inf")
     estado_deslizamiento = "OK" if R_total >= H_actuante else "No cumple"
 
-    # 3) Detalle del dentellón
-    # Umbral práctico: si el dentellón es pequeño, no se diseña como viga independiente.
-    # Puede ajustarse luego si se desea. El PDF tiene un dentellón pequeño y no lo arma
-    # independientemente.
-    umbral_dentellon_profundo_m = 0.35
-    requiere_detalle_viga = bool(datos.usar_llave and datos.profundidad_llave >= umbral_dentellon_profundo_m)
+    umbral_dentellon_armado_m = 0.35
+    requiere_detalle_viga = bool(datos.usar_llave and datos.profundidad_llave >= umbral_dentellon_armado_m)
 
     if datos.usar_llave and datos.profundidad_llave > 0:
         h_key = datos.profundidad_llave
-
-        # Presión pasiva adicional atribuible al dentellón bajo la zapata.
         p_base_dentellon = Kp * datos.gamma_suelo * h_key
         P_dentellon = 0.5 * p_base_dentellon * h_key
-
-        # Idealización de verificación transversal como voladizo embebido en zapata.
         Vu_dentellon = factor_carga_empuje * P_dentellon
-        Mu_dentellon = factor_carga_empuje * P_dentellon * h_key / 3.0
+        Mu_dentellon = 0.0
 
-        # Sección transversal del dentellón como nervio/viga corrida:
-        # b = 1 m de longitud de muro, h = ancho del dentellón en el corte transversal.
         b_cm = 100.0
         h_cm = datos.ancho_llave * 100.0
         d_cm = max(h_cm - recubrimiento_cm - (diametro_llave_mm / 10.0) / 2.0, 1.0)
 
         if requiere_detalle_viga:
-            # Acero longitudinal preliminar por flexión/distribución.
-            As_flexion = resolver_as_flexion_rectangular(
-                Mu_ton_m=Mu_dentellon,
-                b_cm=b_cm,
-                d_cm=d_cm,
-                fc_kg_cm2=datos.fc,
-                fy_kg_cm2=datos.fy
-            )
-            As_min = 0.0018 * b_cm * h_cm / 2.0
-            As_long_req = max(As_flexion, As_min)
-
+            As_long_req = as_min_longitudinal_aci_cm2(b_cm, d_cm, datos.fc, datos.fy)
             Ab_long = area_barra_cm2(diametro_llave_mm)
-            # Como se dibuja tipo viga, proponemos mínimo 4 barras longitudinales.
             n_barras_long = max(4, int(math.ceil(As_long_req / Ab_long)))
             As_long_prov = n_barras_long * Ab_long
 
-            # Estribos cerrados: se calcula una separación práctica por cortante.
-            cortante_dentellon = verificar_cortante_rectangular(
+            cortante = diseno_cortante_dentellon_aci(
                 Vu_ton_m=Vu_dentellon,
                 b_cm=b_cm,
                 d_cm=d_cm,
-                fc_kg_cm2=datos.fc
+                fc_kg_cm2=datos.fc,
+                fy_kg_cm2=datos.fy,
+                diametro_estribo_mm=diametro_estribo_mm,
+                separacion_max_usuario_cm=separacion_max_cm,
+                separacion_max_dentellon_cm=10.0,
+                phi_cortante=0.75
             )
-
-            # Separación base de estribos: si el concreto toma el cortante, usar separación
-            # constructiva limitada por 0.5h, 30 cm y separación máxima.
-            sep_est_constructiva = min(separacion_max_cm, 30.0, max(10.0, 0.5 * h_cm))
-            if cortante_dentellon["estado"] == "OK":
-                sep_estribo_cm = sep_est_constructiva
-                estado_estribos = "OK"
-            else:
-                sep_estribo_cm = min(sep_est_constructiva, 10.0)
-                estado_estribos = "Revisar sección/cortante"
-
-            # Anclaje longitudinal: NO se evalúa con la profundidad vertical del dentellón.
-            # Se debe revisar en los extremos del muro o empalmes longitudinales.
+            sep_estribo_cm = cortante["s_adoptado_cm"]
+            estado_estribos = cortante["estado"]
+            estado_armado = "OK" if estado_estribos.startswith("OK") else "Revisar"
+            criterio_armado = "Dentellón armado: llave de corte con longitudinales mínimos ACI y estribos por cortante."
             ld_long_cm = longitud_desarrollo_basica_cm(diametro_llave_mm, datos.fy, datos.fc)
             estado_anclaje = "Revisar en extremos/traslapes longitudinales"
-
-            estado_armado = "OK" if cortante_dentellon["estado"] == "OK" and estado_estribos == "OK" else "Revisar"
-            criterio_armado = "Dentellón profundo: detallar como viga corrida con longitudinales y estribos."
         else:
-            # Dentellón pequeño: NO se diseña acero independiente.
-            # Solo se considera en peso propio, momentos, resistencia pasiva y deslizamiento.
-            As_flexion = 0.0
-            As_min = 0.0
             As_long_req = 0.0
             n_barras_long = 0
             As_long_prov = 0.0
-            cortante_dentellon = {
-                "Vu_ton_m": Vu_dentellon,
-                "phi_Vc_ton_m": 0.0,
-                "relacion": 0.0,
+            cortante = {
+                "Vc_ton_m": 0.0, "phi_Vc_ton_m": 0.0, "Vs_req_ton_m": 0.0,
+                "Av_s_req_cm2_cm": 0.0, "Av_estribo_cm2": 0.0,
+                "s_calc_cm": 0.0, "s_adoptado_cm": 0.0, "s_max_dentellon_cm": 10.0,
                 "estado": "No aplica: dentellón pequeño monolítico"
             }
             sep_estribo_cm = 0.0
             estado_estribos = "No aplica"
-            ld_long_cm = 0.0
-            estado_anclaje = "No aplica"
             estado_armado = "No requiere diseño independiente"
             criterio_armado = "Dentellón pequeño: tratar monolítico con zapata, como en el PDF."
+            ld_long_cm = 0.0
+            estado_anclaje = "No aplica"
     else:
         h_key = 0.0
         p_base_dentellon = 0.0
@@ -2055,23 +2129,24 @@ def calcular_deslizamiento_y_llave(
         Vu_dentellon = 0.0
         Mu_dentellon = 0.0
         d_cm = 0.0
-        As_flexion = 0.0
-        As_min = 0.0
         As_long_req = 0.0
         n_barras_long = 0
         As_long_prov = 0.0
-        cortante_dentellon = {"Vu_ton_m": 0.0, "phi_Vc_ton_m": 0.0, "relacion": 0.0, "estado": "No aplica"}
+        cortante = {
+            "Vc_ton_m": 0.0, "phi_Vc_ton_m": 0.0, "Vs_req_ton_m": 0.0,
+            "Av_s_req_cm2_cm": 0.0, "Av_estribo_cm2": 0.0,
+            "s_calc_cm": 0.0, "s_adoptado_cm": 0.0, "s_max_dentellon_cm": 10.0,
+            "estado": "No aplica"
+        }
         sep_estribo_cm = 0.0
         estado_estribos = "No aplica"
-        ld_long_cm = 0.0
-        estado_anclaje = "No aplica"
         estado_armado = "No aplica"
         criterio_armado = "No existe dentellón."
+        ld_long_cm = 0.0
+        estado_anclaje = "No aplica"
 
     estado_global = "OK" if estado_deslizamiento == "OK" and estado_armado in [
-        "OK",
-        "No requiere diseño independiente",
-        "No aplica"
+        "OK", "No requiere diseño independiente", "No aplica"
     ] else "Revisar"
 
     return {
@@ -2103,10 +2178,10 @@ def calcular_deslizamiento_y_llave(
         "Mu_dentellon_ton_m_m": Mu_dentellon,
         "d_llave_cm": d_cm,
         "d_dentellon_cm": d_cm,
-        "As_llave_flexion_cm2_m": As_flexion,
-        "As_dentellon_flexion_cm2_m": As_flexion,
-        "As_min_llave_cm2_m": As_min,
-        "As_min_dentellon_cm2_m": As_min,
+        "As_llave_flexion_cm2_m": 0.0,
+        "As_dentellon_flexion_cm2_m": 0.0,
+        "As_min_llave_cm2_m": As_long_req,
+        "As_min_dentellon_cm2_m": As_long_req,
         "As_llave_req_cm2_m": As_long_req,
         "As_long_dentellon_req_cm2_m": As_long_req,
         "diametro_llave_mm": diametro_llave_mm,
@@ -2116,8 +2191,24 @@ def calcular_deslizamiento_y_llave(
         "sep_estribo_dentellon_cm": sep_estribo_cm,
         "As_llave_prov_cm2_m": As_long_prov,
         "As_long_dentellon_prov_cm2_m": As_long_prov,
-        "cortante_llave": cortante_dentellon,
-        "cortante_dentellon": cortante_dentellon,
+        "cortante_llave": {
+            "Vu_ton_m": Vu_dentellon,
+            "phi_Vc_ton_m": cortante["phi_Vc_ton_m"],
+            "relacion": Vu_dentellon / cortante["phi_Vc_ton_m"] if cortante["phi_Vc_ton_m"] > 0 else 0.0,
+            "estado": cortante["estado"]
+        },
+        "cortante_dentellon": {
+            "Vu_ton_m": Vu_dentellon,
+            "Vc_ton_m": cortante["Vc_ton_m"],
+            "phi_Vc_ton_m": cortante["phi_Vc_ton_m"],
+            "Vs_req_ton_m": cortante["Vs_req_ton_m"],
+            "Av_s_req_cm2_cm": cortante["Av_s_req_cm2_cm"],
+            "Av_estribo_cm2": cortante["Av_estribo_cm2"],
+            "s_calc_cm": cortante["s_calc_cm"],
+            "s_adoptado_cm": cortante["s_adoptado_cm"],
+            "s_max_dentellon_cm": cortante["s_max_dentellon_cm"],
+            "estado": cortante["estado"]
+        },
         "ld_llave_cm": ld_long_cm,
         "ld_longitudinal_dentellon_cm": ld_long_cm,
         "longitud_disponible_llave_cm": 0.0,
@@ -2134,19 +2225,12 @@ def calcular_deslizamiento_y_llave(
 
 
 
-
-
 def tabla_deslizamiento_llave(resultado: dict) -> pd.DataFrame:
     """
-    Tabla resumen corregida de deslizamiento, resistencia pasiva y dentellón.
-
-    Si el dentellón es pequeño, NO muestra diseño de acero independiente.
-    Si el dentellón es profundo, muestra diseño tipo viga corrida:
-    longitudinales acostadas + estribos cerrados.
+    Tabla resumen de deslizamiento, resistencia pasiva y dentellón.
     """
     filas = [
         ("Estado global", resultado["estado_global"], "-"),
-
         ("1. DESLIZAMIENTO", "", ""),
         ("Empuje horizontal PAh", resultado["PA_h_ton_m"], "ton/m"),
         ("Empuje horizontal factorizado", resultado["H_actuante_ton_m"], "ton/m"),
@@ -2156,7 +2240,6 @@ def tabla_deslizamiento_llave(resultado: dict) -> pd.DataFrame:
         ("Resistencia total R", resultado["R_total_ton_m"], "ton/m"),
         ("FS o relación R/H", resultado["FS_deslizamiento"], "-"),
         ("Estado deslizamiento", resultado["estado_deslizamiento"], "-"),
-
         ("2. RESISTENCIA PASIVA", "", ""),
         ("Kp Rankine", resultado["Kp"], "-"),
         ("Altura pasiva zapata", resultado["altura_pasiva_zapata_m"], "m"),
@@ -2165,33 +2248,34 @@ def tabla_deslizamiento_llave(resultado: dict) -> pd.DataFrame:
         ("PP total nominal", resultado["PP_total_nominal_ton_m"], "ton/m"),
         ("Incremento por dentellón", resultado["PP_dentellon_extra_nominal_ton_m"], "ton/m"),
         ("PP de diseño", resultado["PP_diseno_ton_m"], "ton/m"),
-
-        ("3. CRITERIO DEL DENTELLÓN", "", ""),
+        ("3. DENTELLÓN COMO LLAVE DE CORTE", "", ""),
         ("Criterio", resultado["criterio_armado_dentellon"], "-"),
-        ("Requiere armado independiente tipo viga", "Sí" if resultado["requiere_detalle_viga"] else "No", "-"),
+        ("Requiere armado independiente", "Sí" if resultado["requiere_detalle_viga"] else "No", "-"),
         ("Profundidad dentellón", resultado["h_key_m"], "m"),
         ("Presión pasiva base dentellón", resultado["p_base_dentellon_ton_m2"], "ton/m²"),
         ("Fuerza pasiva sobre dentellón", resultado["P_dentellon_ton_m"], "ton/m"),
-        ("Mu dentellón", resultado["Mu_dentellon_ton_m_m"], "ton·m/m"),
         ("Vu dentellón", resultado["Vu_dentellon_ton_m"], "ton/m"),
     ]
 
     if resultado["requiere_detalle_viga"]:
+        cd = resultado["cortante_dentellon"]
+        s_calc = cd["s_calc_cm"] if math.isfinite(cd["s_calc_cm"]) else "No requiere Vs"
         filas.extend([
-            ("4. ARMADO DEL DENTELLÓN COMO VIGA CORRIDA", "", ""),
+            ("4. ARMADO DEL DENTELLÓN", "", ""),
             ("d dentellón", resultado["d_dentellon_cm"], "cm"),
-            ("As flexión longitudinal", resultado["As_dentellon_flexion_cm2_m"], "cm²/m"),
-            ("As mínimo longitudinal", resultado["As_min_dentellon_cm2_m"], "cm²/m"),
-            ("As longitudinal requerido", resultado["As_long_dentellon_req_cm2_m"], "cm²/m"),
+            ("As longitudinal mínimo ACI", resultado["As_min_dentellon_cm2_m"], "cm²/m"),
             ("As longitudinal provisto", resultado["As_long_dentellon_prov_cm2_m"], "cm²/m"),
-            ("Longitudinales", f"{resultado['n_barras_long_dentellon']}Ø{resultado['diametro_llave_mm']:.0f}", "barras"),
-            ("Estribos cerrados", f"Ø{resultado['diametro_estribo_mm']:.0f} @ {resultado['sep_estribo_dentellon_cm']:.1f}", "mm @ cm"),
-            ("φVc dentellón", resultado["cortante_dentellon"]["phi_Vc_ton_m"], "ton/m"),
-            ("Estado cortante dentellón", resultado["cortante_dentellon"]["estado"], "-"),
-            ("Estado estribos dentellón", resultado["estado_estribos_dentellon"], "-"),
-            ("ld longitudinal estimada", resultado["ld_longitudinal_dentellon_cm"], "cm"),
+            ("Longitudinales mínimos", f"{resultado['n_barras_long_dentellon']}Ø{resultado['diametro_llave_mm']:.0f}", "barras"),
+            ("Vc concreto", cd["Vc_ton_m"], "ton/m"),
+            ("φVc", cd["phi_Vc_ton_m"], "ton/m"),
+            ("Vs requerido", cd["Vs_req_ton_m"], "ton/m"),
+            ("Av/s requerido", cd["Av_s_req_cm2_cm"], "cm²/cm"),
+            ("Av estribo 2 ramas", cd["Av_estribo_cm2"], "cm²"),
+            ("s calculado", s_calc, "cm"),
+            ("s máximo dentellón", cd["s_max_dentellon_cm"], "cm"),
+            ("Estribos adoptados", f"Ø{resultado['diametro_estribo_mm']:.0f} @ {resultado['sep_estribo_dentellon_cm']:.1f}", "mm @ cm"),
+            ("Estado cortante/estribos", cd["estado"], "-"),
             ("Nota anclaje longitudinal", resultado["estado_anclaje_dentellon"], "-"),
-            ("Estado armado dentellón", resultado["estado_armado_dentellon"], "-"),
         ])
     else:
         filas.extend([
@@ -2493,6 +2577,252 @@ def dibujar_detalle_general_armado(ax, datos: DatosMuro, geometria: dict, result
 
     ax.set_title("Detalle general de armado del muro de retención")
 
+
+
+def tabla_resumen_armado_dentellon(resultado: dict) -> pd.DataFrame:
+    """
+    Tabla corta de armado del dentellón.
+    """
+    if resultado.get("requiere_detalle_viga", False):
+        cd = resultado["cortante_dentellon"]
+        s_calc = cd["s_calc_cm"] if math.isfinite(cd["s_calc_cm"]) else "No requiere Vs"
+        filas = [
+            ("Criterio", resultado["criterio_armado_dentellon"], "-"),
+            ("As longitudinal mínimo ACI", resultado["As_min_dentellon_cm2_m"], "cm²/m"),
+            ("As longitudinal provisto", resultado["As_long_dentellon_prov_cm2_m"], "cm²/m"),
+            ("Longitudinales mínimos", f"{resultado['n_barras_long_dentellon']}Ø{resultado['diametro_llave_mm']:.0f}", "barras"),
+            ("Vu", resultado["Vu_dentellon_ton_m"], "ton/m"),
+            ("φVc", cd["phi_Vc_ton_m"], "ton/m"),
+            ("Vs requerido", cd["Vs_req_ton_m"], "ton/m"),
+            ("Av/s requerido", cd["Av_s_req_cm2_cm"], "cm²/cm"),
+            ("s calculado", s_calc, "cm"),
+            ("Estribos adoptados", f"Ø{resultado['diametro_estribo_mm']:.0f} @ {resultado['sep_estribo_dentellon_cm']:.1f}", "mm @ cm"),
+            ("Estado", cd["estado"], "-"),
+        ]
+    else:
+        filas = [
+            ("Criterio", resultado["criterio_armado_dentellon"], "-"),
+            ("Requiere armado independiente", "No", "-"),
+            ("Estado", resultado["estado_armado_dentellon"], "-"),
+            ("Nota", "Se considera monolítico con la zapata.", "-"),
+        ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
+def _preparar_eje_detalle(ax, titulo: str, xlim: tuple[float, float], ylim: tuple[float, float]):
+    """
+    Configura un eje de dibujo para un detalle de armado.
+
+    Se usa en los esquemas didácticos de la última pestaña para mantener una
+    presentación limpia, con grilla suave y aspecto geométrico adecuado.
+    """
+    ax.set_title(titulo)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, linestyle=":", linewidth=0.7)
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+
+
+def dibujar_detalle_pantalla_frontal(ax, datos: DatosMuro, resultado_fuste: dict):
+    """
+    Dibuja la vista frontal de la pantalla del muro.
+
+    Se representa una franja didáctica de 1.00 m de ancho del muro para mostrar:
+    - barras verticales principales;
+    - barras horizontales de distribución;
+    - texto del armado adoptado.
+    """
+    ancho_panel = 1.00
+    ax.add_patch(Polygon([(0, 0), (ancho_panel, 0), (ancho_panel, datos.H), (0, datos.H)],
+                         closed=True, fill=False, linewidth=2.0))
+
+    # Barras verticales
+    for x in [0.12, 0.32, 0.52, 0.72, 0.88]:
+        ax.plot([x, x], [0.08, datos.H - 0.08], linewidth=2.0)
+
+    # Barras horizontales
+    n_h = 7
+    for i in range(1, n_h + 1):
+        y = datos.H * i / (n_h + 1)
+        ax.plot([0.06, ancho_panel - 0.06], [y, y], linewidth=1.0, linestyle="--")
+
+    ax.text(
+        ancho_panel / 2,
+        -0.22,
+        f"Vertical principal: Ø{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm",
+        ha="center", va="top", fontsize=8
+    )
+    ax.text(
+        ancho_panel / 2,
+        -0.40,
+        f"Horizontal distribución: Ø{resultado_fuste['diametro_horizontal_mm']:.0f} @ {resultado_fuste['separacion_horizontal_cm']:.1f} cm",
+        ha="center", va="top", fontsize=8
+    )
+
+    _preparar_eje_detalle(ax, "Pantalla - vista frontal", (-0.10, 1.10), (-0.55, max(datos.H + 0.20, 1.0)))
+
+
+
+def dibujar_detalle_pantalla_corte(ax, datos: DatosMuro, geometria: dict, resultado_fuste: dict):
+    """
+    Dibuja el corte transversal de la pantalla del muro con acero en ambas caras.
+    """
+    dibujar_poligono(ax, geometria["fuste"], "Pantalla")
+
+    x_relleno = geometria["x_dorso_fuste_base"] - 0.06
+    x_frontal = geometria["x_frente_fuste"] + 0.06
+
+    ax.plot([x_relleno, x_relleno], [0.10, datos.H - 0.10], linewidth=2.2)
+    for y in [datos.H * 0.20, datos.H * 0.42, datos.H * 0.64, datos.H * 0.86]:
+        ax.scatter([x_relleno], [y], s=22)
+
+    ax.plot([x_frontal, x_frontal], [0.10, datos.H - 0.10], linewidth=2.2)
+    for y in [datos.H * 0.20, datos.H * 0.42, datos.H * 0.64, datos.H * 0.86]:
+        ax.scatter([x_frontal], [y], s=22)
+
+    for y in [datos.H * 0.25, datos.H * 0.45, datos.H * 0.65, datos.H * 0.85]:
+        ax.plot([x_frontal, x_relleno], [y, y], linewidth=1.1, linestyle="--")
+
+    ax.text(
+        x_relleno + 0.35,
+        datos.H * 0.60,
+        f"Cara posterior / relleno\nØ{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm",
+        fontsize=8, ha="left", va="center"
+    )
+    ax.text(
+        x_frontal - 0.35,
+        datos.H * 0.36,
+        f"Cara frontal\nØ{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm",
+        fontsize=8, ha="right", va="center"
+    )
+    ax.text(
+        (x_frontal + x_relleno) / 2,
+        datos.H * 0.12,
+        f"Horizontal/distribución\nØ{resultado_fuste['diametro_horizontal_mm']:.0f} @ {resultado_fuste['separacion_horizontal_cm']:.1f} cm",
+        fontsize=8, ha="center", va="center"
+    )
+
+    _preparar_eje_detalle(
+        ax,
+        "Pantalla - corte",
+        (datos.puntera - 0.45, datos.puntera + datos.t_base + 1.25),
+        (-0.20, max(datos.H + 0.30, 1.0))
+    )
+
+
+def dibujar_detalle_zapata_planta(ax, datos: DatosMuro, resultado_zapata: dict):
+    """
+    Dibuja una vista superior didáctica de la zapata.
+
+    Se representa una franja longitudinal del muro donde se identifican la
+    puntera y el talón, además de la dirección del acero principal.
+    """
+    largo = 3.00
+    ax.add_patch(Polygon([(0, 0), (datos.B, 0), (datos.B, largo), (0, largo)],
+                         closed=True, fill=False, linewidth=2.0))
+    x_fuste1 = datos.puntera
+    x_fuste2 = datos.puntera + datos.t_base
+    ax.add_patch(Polygon([(x_fuste1, 0.85), (x_fuste2, 0.85), (x_fuste2, 2.15), (x_fuste1, 2.15)],
+                         closed=True, fill=False, linewidth=1.8))
+
+    # Barras puntera (sentido longitudinal)
+    for y in [0.35, 0.75, 1.15, 1.55, 1.95, 2.35, 2.75]:
+        ax.plot([0.15, max(datos.puntera - 0.10, 0.15)], [y, y], linewidth=1.6)
+
+    # Barras talón (sentido longitudinal)
+    x_t0 = datos.puntera + datos.t_base + 0.10
+    x_t1 = datos.B - 0.15
+    for y in [0.35, 0.75, 1.15, 1.55, 1.95, 2.35, 2.75]:
+        ax.plot([x_t0, x_t1], [y, y], linewidth=1.6)
+
+    ax.text(datos.puntera / 2, 3.12,
+            f"Puntera: Ø{resultado_zapata['diametro_puntera_mm']:.0f} @ {resultado_zapata['sep_puntera_cm']:.1f} cm",
+            ha="center", va="bottom", fontsize=8)
+    ax.text((x_t0 + x_t1) / 2, 3.12,
+            f"Talón: Ø{resultado_zapata['diametro_talon_mm']:.0f} @ {resultado_zapata['sep_talon_cm']:.1f} cm",
+            ha="center", va="bottom", fontsize=8)
+    ax.text((x_fuste1 + x_fuste2)/2, 1.50, "Pantalla", ha="center", va="center", fontsize=8)
+
+    _preparar_eje_detalle(ax, "Zapata - vista superior", (-0.20, datos.B + 0.20), (-0.15, 3.45))
+
+
+def dibujar_detalle_zapata_corte(ax, datos: DatosMuro, geometria: dict, resultado_zapata: dict):
+    """
+    Dibuja el corte de la zapata con el acero principal de puntera y talón.
+    """
+    dibujar_poligono(ax, geometria["zapata"], "Zapata")
+    dibujar_poligono(ax, geometria["fuste"], "Fuste")
+
+    y_inf = -datos.hz + 0.08
+    y_sup = -0.08
+
+    ax.plot([0.08, max(datos.puntera - 0.08, 0.08)], [y_inf, y_inf], linewidth=2.4)
+    ax.plot([datos.puntera + datos.t_base + 0.08, datos.B - 0.08], [y_sup, y_sup], linewidth=2.4)
+
+    ax.text(datos.puntera / 2, y_inf - 0.14,
+            f"Puntera inf.\nØ{resultado_zapata['diametro_puntera_mm']:.0f} @ {resultado_zapata['sep_puntera_cm']:.1f} cm",
+            ha="center", va="top", fontsize=8)
+    ax.text((datos.puntera + datos.t_base + datos.B) / 2, y_sup + 0.14,
+            f"Talón sup.\nØ{resultado_zapata['diametro_talon_mm']:.0f} @ {resultado_zapata['sep_talon_cm']:.1f} cm",
+            ha="center", va="bottom", fontsize=8)
+
+    _preparar_eje_detalle(ax, "Zapata - corte", (-0.20, datos.B + 0.20), (-datos.hz - max(0.60, datos.profundidad_llave + 0.30), max(datos.H * 0.20, 0.60)))
+
+
+def dibujar_detalle_dentellon_corte(ax, datos: DatosMuro, geometria: dict, resultado_dentellon: dict):
+    """
+    Dibuja el corte del dentellón.
+
+    - Si el dentellón es pequeño, solo se muestra como elemento monolítico.
+    - Si requiere diseño independiente, se muestran longitudinales y estribos.
+    """
+    if not datos.usar_llave or "llave" not in geometria:
+        ax.text(0.5, 0.5, "Sin dentellón", ha="center", va="center", fontsize=12)
+        ax.set_axis_off()
+        return
+
+    x1 = datos.pos_llave - datos.ancho_llave / 2
+    x2 = datos.pos_llave + datos.ancho_llave / 2
+    y1 = -datos.hz
+    y2 = -datos.hz - datos.profundidad_llave
+
+    # Zapata local
+    ax.add_patch(Polygon([(x1 - 0.60, 0), (x2 + 0.60, 0), (x2 + 0.60, -datos.hz), (x1 - 0.60, -datos.hz)],
+                         closed=True, fill=False, linewidth=2.0))
+    # Dentellón
+    ax.add_patch(Polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)],
+                         closed=True, fill=False, linewidth=2.0))
+
+    if resultado_dentellon.get("requiere_detalle_viga", False):
+        # 4 barras longitudinales en corte
+        xs = [x1 + datos.ancho_llave * 0.25, x1 + datos.ancho_llave * 0.75]
+        ys = [y1 - datos.profundidad_llave * 0.25, y1 - datos.profundidad_llave * 0.75]
+        for xx in xs:
+            for yy in ys:
+                ax.scatter([xx], [yy], s=28)
+
+        # Estribo cerrado
+        rec = min(datos.ancho_llave, datos.profundidad_llave) * 0.15
+        ax.add_patch(Polygon(
+            [(x1 + rec, y1 - rec), (x2 - rec, y1 - rec), (x2 - rec, y2 + rec), (x1 + rec, y2 + rec)],
+            closed=True, fill=False, linewidth=1.2, linestyle="--"
+        ))
+
+        txt1 = f"Longitudinales: {resultado_dentellon['n_barras_long_dentellon']}Ø{resultado_dentellon['diametro_llave_mm']:.0f}"
+        txt2 = f"Estribos: Ø{resultado_dentellon['diametro_estribo_mm']:.0f} @ {resultado_dentellon['sep_estribo_dentellon_cm']:.1f} cm"
+    else:
+        txt1 = "Dentellón pequeño"
+        txt2 = "Monolítico con zapata"
+
+    ax.text((x1 + x2) / 2, y2 - 0.12, txt1, ha="center", va="top", fontsize=8)
+    ax.text((x1 + x2) / 2, y2 - 0.26, txt2, ha="center", va="top", fontsize=8)
+
+    _preparar_eje_detalle(ax, "Dentellón - corte", (x1 - 0.80, x2 + 0.80), (y2 - 0.40, 0.50))
+
+
+
 # Lista explícita de nombres que app.py puede importar desde este módulo.
 __all__ = [
     "DatosMuro",
@@ -2533,4 +2863,12 @@ __all__ = [
     "convertir_resistencias_a_sistema_interno",
     "recomendar_posicion_dentellon",
     "tabla_momentos_estabilidad",
+    "diseno_cortante_dentellon_aci",
+    "as_min_longitudinal_aci_cm2",
+    "dibujar_detalle_dentellon_corte",
+    "dibujar_detalle_zapata_corte",
+    "dibujar_detalle_zapata_planta",
+    "dibujar_detalle_pantalla_corte",
+    "dibujar_detalle_pantalla_frontal",
+    "tabla_resumen_armado_dentellon",
 ]

@@ -317,3 +317,30 @@ viga corrida, la app muestra:
 - estribos cerrados;
 - cortante;
 - acero longitudinal requerido/provisto.
+
+
+## Cambios solicitados
+
+- Se eliminó la imagen de la pestaña **Dentellón y deslizamiento**.
+- En esa pestaña ahora se muestra solo un **resumen del armado del dentellón**.
+- En la última pestaña se reemplazó la imagen única anterior por un conjunto de
+  detalles didácticos:
+  - pantalla del muro: vista frontal y corte;
+  - zapata: vista superior y corte;
+  - dentellón: vista en corte.
+
+
+## Corrección final: dentellón como llave de corte
+
+Se corrigió el criterio de diseño local del dentellón:
+
+- Ya no se diseña como cantiléver gobernado por flexión.
+- Se trata como llave de corte.
+- Si el dentellón es pequeño, se considera monolítico con la zapata y no se arma independientemente.
+- Si el dentellón requiere armado independiente:
+  - los longitudinales se calculan con acero mínimo tipo ACI;
+  - los estribos se calculan por cortante;
+  - la separación adoptada queda limitada a máximo 10 cm para el dentellón.
+- La vista en corte de la pantalla ahora muestra dos capas de acero:
+  - cara posterior hacia el relleno;
+  - cara frontal.

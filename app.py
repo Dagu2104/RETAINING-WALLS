@@ -398,23 +398,18 @@ with col_der:
 
             st.dataframe(fm.tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
 
-            st.subheader("4. Efecto de la ubicación del dentellón en momentos")
+            st.subheader("4. Resumen de armado del dentellón")
+            st.dataframe(fm.tabla_resumen_armado_dentellon(resultado_llave), use_container_width=True, hide_index=True)
+
+            st.subheader("5. Efecto de la ubicación del dentellón en momentos")
             if hasattr(fm, "tabla_momentos_estabilidad"):
                 st.dataframe(fm.tabla_momentos_estabilidad(resultado_llave["presiones"]), use_container_width=True, hide_index=True)
             else:
                 st.warning("Actualiza funciones_muro.py: falta tabla_momentos_estabilidad().")
 
-            fig_l, ax_l = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            fm.dibujar_deslizamiento_pasivo_llave(ax_l, datos, geometria, resultado_llave, mostrar_ejes=mostrar_ejes)
-            buffer_l = BytesIO()
-            fig_l.savefig(buffer_l, format="png", bbox_inches="tight")
-            buffer_l.seek(0)
-            st.image(buffer_l, width=760)
-            plt.close(fig_l)
-
             st.info(
-                "Este módulo es dinámico: si cambias φ, γs, μ, altura, zapata, dentellón o geometría, "
-                "se recalculan PAh, Rf, PP, deslizamiento y armado del dentellón."
+                "En esta pestaña ya no se muestra la imagen del dentellón. "
+                "Solo se deja el resumen del armado y las verificaciones numéricas."
             )
 
 
@@ -446,30 +441,53 @@ with col_der:
                 diametro_estribo_mm=float(diametro_estribo_dentellon_mm)
             )
 
-            st.subheader("Detalle general de armado")
+            st.subheader("Detalles didácticos de armado")
             st.write(
-                "La imagen reúne en una sola vista el armado de la pantalla, el armado de la zapata "
-                "(puntera y talón) y el dentellón corregido como viga corrida: longitudinales acostadas y estribos cerrados."
+                "Se muestran vistas separadas de cada componente del muro: "
+                "pantalla (frontal y corte), zapata (superior y corte) y dentellón (corte)."
             )
 
-            fig_det, ax_det = plt.subplots(figsize=(10.0, 6.6), dpi=130)
-            fm.dibujar_detalle_general_armado(
-                ax_det,
-                datos,
-                geometria,
-                resultado_fuste,
-                resultado_zapata,
-                resultado_dentellon,
-                mostrar_ejes=mostrar_ejes
-            )
+            fig_det = plt.figure(figsize=(11.0, 12.0), dpi=130, constrained_layout=True)
+            gs = fig_det.add_gridspec(3, 2)
+
+            ax_pf = fig_det.add_subplot(gs[0, 0])
+            ax_pc = fig_det.add_subplot(gs[0, 1])
+            ax_zs = fig_det.add_subplot(gs[1, 0])
+            ax_zc = fig_det.add_subplot(gs[1, 1])
+            ax_dc = fig_det.add_subplot(gs[2, 0])
+            ax_tx = fig_det.add_subplot(gs[2, 1])
+
+            fm.dibujar_detalle_pantalla_frontal(ax_pf, datos, resultado_fuste)
+            fm.dibujar_detalle_pantalla_corte(ax_pc, datos, geometria, resultado_fuste)
+            fm.dibujar_detalle_zapata_planta(ax_zs, datos, resultado_zapata)
+            fm.dibujar_detalle_zapata_corte(ax_zc, datos, geometria, resultado_zapata)
+            fm.dibujar_detalle_dentellon_corte(ax_dc, datos, geometria, resultado_dentellon)
+
+            ax_tx.axis("off")
+            resumen_txt = [
+                "RESUMEN GENERAL",
+                f"Pantalla: Ø{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm (ambas caras)",
+                f"Pantalla: Ø{resultado_fuste['diametro_horizontal_mm']:.0f} @ {resultado_fuste['separacion_horizontal_cm']:.1f} cm (horizontal)",
+                f"Puntera: Ø{resultado_zapata['diametro_puntera_mm']:.0f} @ {resultado_zapata['sep_puntera_cm']:.1f} cm",
+                f"Talón: Ø{resultado_zapata['diametro_talon_mm']:.0f} @ {resultado_zapata['sep_talon_cm']:.1f} cm",
+            ]
+            if resultado_dentellon.get("requiere_detalle_viga", False):
+                resumen_txt.append(
+                    f"Dentellón: {resultado_dentellon['n_barras_long_dentellon']}Ø{resultado_dentellon['diametro_llave_mm']:.0f} + Estr. Ø{resultado_dentellon['diametro_estribo_mm']:.0f} @ {resultado_dentellon['sep_estribo_dentellon_cm']:.1f} cm"
+                )
+            else:
+                resumen_txt.append("Dentellón: pequeño, monolítico con zapata, sin armado independiente")
+
+            ax_tx.text(0.02, 0.98, "\n".join(resumen_txt), ha="left", va="top", fontsize=10)
+
             buffer_det = BytesIO()
             fig_det.savefig(buffer_det, format="png", bbox_inches="tight")
             buffer_det.seek(0)
-            st.image(buffer_det, width=920)
+            st.image(buffer_det, width=980)
             plt.close(fig_det)
 
             st.caption(
-                "El detalle se actualiza dinámicamente con los diámetros, separaciones, geometría "
+                "Estos detalles se actualizan dinámicamente con los diámetros, separaciones, geometría "
                 "y resultados de diseño de cada componente."
             )
 
