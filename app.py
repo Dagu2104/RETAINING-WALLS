@@ -2,35 +2,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 from io import BytesIO
 
-from funciones_muro import (
-    DatosMuro,
-    validar_datos_muro,
-    generar_puntos_muro,
-    dibujar_muro,
-    dibujar_diagrama_fuerzas,
-    calcular_trial_wedge_activo,
-    dibujar_trial_wedge_critico,
-    graficar_curva_trial_wedge,
-    calcular_verificacion_caltrans_pdf,
-    tabla_comparacion_pdf,
-    tabla_fuerzas_pdf,
-    generar_memoria_word,
-    calcular_diseno_fuste_dinamico,
-    tabla_diseno_fuste,
-    dibujar_armado_fuste,
-    calcular_diseno_zapata_dinamico,
-    tabla_presiones_contacto,
-    tabla_diseno_zapata,
-    dibujar_presiones_contacto,
-    dibujar_armado_zapata,
-    calcular_diseno_zapata_definitivo,
-    tabla_diseno_zapata_definitivo,
-    dibujar_detalle_zapata_definitivo,
-    calcular_deslizamiento_y_llave,
-    tabla_deslizamiento_llave,
-    dibujar_deslizamiento_pasivo_llave,
-    dibujar_detalle_general_armado,
-)
+import funciones_muro as fm
 
 st.set_page_config(
     page_title="Diseño de muro de contención",
@@ -149,7 +121,7 @@ diametro_llave_mm = st.sidebar.selectbox(
     index=1
 )
 
-datos = DatosMuro(
+datos = fm.DatosMuro(
     H=H,
     B=B,
     hz=hz,
@@ -173,7 +145,7 @@ datos = DatosMuro(
     gamma_hormigon=gamma_hormigon,
 )
 
-errores = validar_datos_muro(datos)
+errores = fm.validar_datos_muro(datos)
 
 col_izq, col_der = st.columns([0.33, 1.67])
 
@@ -183,7 +155,7 @@ with col_izq:
         for error in errores:
             st.write(f"• {error}")
     else:
-        memoria_bytes = generar_memoria_word(datos, incluir_pdf=True)
+        memoria_bytes = fm.generar_memoria_word(datos, incluir_pdf=True)
         st.download_button(
             label="Descargar memoria preliminar Word",
             data=memoria_bytes,
@@ -192,22 +164,22 @@ with col_izq:
         )
 
     with st.expander("Verificación con ejemplo del PDF"):
-        resultados_pdf = calcular_verificacion_caltrans_pdf()
+        resultados_pdf = fm.calcular_verificacion_caltrans_pdf()
         st.write("Se calculan los estados límite del ejemplo Caltrans usando los valores del PDF.")
-        st.dataframe(tabla_comparacion_pdf(resultados_pdf), use_container_width=True, hide_index=True)
+        st.dataframe(fm.tabla_comparacion_pdf(resultados_pdf), use_container_width=True, hide_index=True)
 
     with st.expander("Fuerzas del ejemplo PDF"):
-        st.dataframe(tabla_fuerzas_pdf(), use_container_width=True, hide_index=True)
+        st.dataframe(fm.tabla_fuerzas_pdf(), use_container_width=True, hide_index=True)
 
 with col_der:
     if not errores:
-        geometria = generar_puntos_muro(datos)
+        geometria = fm.generar_puntos_muro(datos)
 
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata", "Dentellón y deslizamiento", "Detalle general"])
 
         with tab1:
             fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_muro(
+            fm.dibujar_muro(
                 ax,
                 datos,
                 geometria,
@@ -224,7 +196,7 @@ with col_der:
         with tab2:
             if mostrar_fuerzas:
                 fig_f, ax_f = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-                dibujar_diagrama_fuerzas(
+                fm.dibujar_diagrama_fuerzas(
                     ax_f,
                     datos,
                     geometria,
@@ -239,7 +211,7 @@ with col_der:
                 st.info("Activa 'Mostrar diagrama de fuerzas' en la barra lateral.")
 
         with tab3:
-            tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+            tabla_trial, resultado_trial = fm.calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
 
             col_a, col_b = st.columns([1, 1])
             with col_a:
@@ -256,7 +228,7 @@ with col_der:
                 )
 
             fig_cuna, ax_cuna = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_trial_wedge_critico(ax_cuna, datos, geometria, resultado_trial, mostrar_ejes=mostrar_ejes)
+            fm.dibujar_trial_wedge_critico(ax_cuna, datos, geometria, resultado_trial, mostrar_ejes=mostrar_ejes)
             buffer_cuna = BytesIO()
             fig_cuna.savefig(buffer_cuna, format="png", bbox_inches="tight")
             buffer_cuna.seek(0)
@@ -264,7 +236,7 @@ with col_der:
             plt.close(fig_cuna)
 
             fig_curva, ax_curva = plt.subplots(figsize=(8.2, 4.2), dpi=130)
-            graficar_curva_trial_wedge(ax_curva, tabla_trial)
+            fm.graficar_curva_trial_wedge(ax_curva, tabla_trial)
             buffer_curva = BytesIO()
             fig_curva.savefig(buffer_curva, format="png", bbox_inches="tight")
             buffer_curva.seek(0)
@@ -276,7 +248,7 @@ with col_der:
 
 
         with tab4:
-            resultado_fuste = calcular_diseno_fuste_dinamico(
+            resultado_fuste = fm.calcular_diseno_fuste_dinamico(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -293,10 +265,10 @@ with col_der:
                 f"Ø{resultado_fuste['diametro_vertical_mm']:.0f} @ {resultado_fuste['separacion_vertical_cm']:.1f} cm"
             )
 
-            st.dataframe(tabla_diseno_fuste(resultado_fuste), use_container_width=True, hide_index=True)
+            st.dataframe(fm.tabla_diseno_fuste(resultado_fuste), use_container_width=True, hide_index=True)
 
             fig_arm, ax_arm = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_armado_fuste(ax_arm, datos, geometria, resultado_fuste, mostrar_ejes=mostrar_ejes)
+            fm.dibujar_armado_fuste(ax_arm, datos, geometria, resultado_fuste, mostrar_ejes=mostrar_ejes)
             buffer_arm = BytesIO()
             fig_arm.savefig(buffer_arm, format="png", bbox_inches="tight")
             buffer_arm.seek(0)
@@ -310,7 +282,7 @@ with col_der:
 
 
         with tab5:
-            resultado_zapata = calcular_diseno_zapata_definitivo(
+            resultado_zapata = fm.calcular_diseno_zapata_definitivo(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -328,10 +300,10 @@ with col_der:
             col_z4.metric("Mu talón", f"{resultado_zapata['Mu_talon_ton_m_m']:.3f} ton·m/m")
 
             st.subheader("1. Presiones de contacto")
-            st.dataframe(tabla_presiones_contacto(presiones), use_container_width=True, hide_index=True)
+            st.dataframe(fm.tabla_presiones_contacto(presiones), use_container_width=True, hide_index=True)
 
             fig_q, ax_q = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_presiones_contacto(ax_q, datos, geometria, presiones, mostrar_ejes=mostrar_ejes)
+            fm.dibujar_presiones_contacto(ax_q, datos, geometria, presiones, mostrar_ejes=mostrar_ejes)
             buffer_q = BytesIO()
             fig_q.savefig(buffer_q, format="png", bbox_inches="tight")
             buffer_q.seek(0)
@@ -339,10 +311,10 @@ with col_der:
             plt.close(fig_q)
 
             st.subheader("2. Diseño de puntera y talón")
-            st.dataframe(tabla_diseno_zapata_definitivo(resultado_zapata), use_container_width=True, hide_index=True)
+            st.dataframe(fm.tabla_diseno_zapata_definitivo(resultado_zapata), use_container_width=True, hide_index=True)
 
             fig_z, ax_z = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_detalle_zapata_definitivo(ax_z, datos, geometria, resultado_zapata, mostrar_ejes=mostrar_ejes)
+            fm.dibujar_detalle_zapata_definitivo(ax_z, datos, geometria, resultado_zapata, mostrar_ejes=mostrar_ejes)
             buffer_z = BytesIO()
             fig_z.savefig(buffer_z, format="png", bbox_inches="tight")
             buffer_z.seek(0)
@@ -356,7 +328,7 @@ with col_der:
 
 
         with tab6:
-            resultado_llave = calcular_deslizamiento_y_llave(
+            resultado_llave = fm.calcular_deslizamiento_y_llave(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -388,10 +360,10 @@ with col_der:
                 "Se calcula Mu, Vu, As requerido, As provisto, cortante y anclaje preliminar."
             )
 
-            st.dataframe(tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
+            st.dataframe(fm.tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
 
             fig_l, ax_l = plt.subplots(figsize=(8.2, 5.6), dpi=130)
-            dibujar_deslizamiento_pasivo_llave(ax_l, datos, geometria, resultado_llave, mostrar_ejes=mostrar_ejes)
+            fm.dibujar_deslizamiento_pasivo_llave(ax_l, datos, geometria, resultado_llave, mostrar_ejes=mostrar_ejes)
             buffer_l = BytesIO()
             fig_l.savefig(buffer_l, format="png", bbox_inches="tight")
             buffer_l.seek(0)
@@ -405,7 +377,7 @@ with col_der:
 
 
         with tab7:
-            resultado_fuste = calcular_diseno_fuste_dinamico(
+            resultado_fuste = fm.calcular_diseno_fuste_dinamico(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -414,7 +386,7 @@ with col_der:
                 separacion_max_cm=separacion_max_cm
             )
 
-            resultado_zapata = calcular_diseno_zapata_definitivo(
+            resultado_zapata = fm.calcular_diseno_zapata_definitivo(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -423,7 +395,7 @@ with col_der:
                 separacion_max_cm=separacion_max_cm
             )
 
-            resultado_dentellon = calcular_deslizamiento_y_llave(
+            resultado_dentellon = fm.calcular_deslizamiento_y_llave(
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
@@ -438,7 +410,7 @@ with col_der:
             )
 
             fig_det, ax_det = plt.subplots(figsize=(10.0, 6.6), dpi=130)
-            dibujar_detalle_general_armado(
+            fm.dibujar_detalle_general_armado(
                 ax_det,
                 datos,
                 geometria,

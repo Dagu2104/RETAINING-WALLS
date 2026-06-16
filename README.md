@@ -175,3 +175,22 @@ Esta pestaña muestra en una sola imagen:
 
 Además, se mejoró la terminología visible en la interfaz para usar **dentellón**
 en lugar de **llave**, que es el término más apropiado en este contexto.
+
+
+## Corrección de importación Streamlit Cloud
+
+Esta versión cambia el `app.py` para importar el módulo completo:
+
+```python
+import funciones_muro as fm
+```
+
+Esto evita errores de `ImportError` cuando Streamlit Cloud queda con una versión desfasada del archivo `funciones_muro.py` o cuando el import nombrado falla al arrancar.
+
+Subir siempre juntos:
+- `app.py`
+- `funciones_muro.py`
+- `README.md`
+- `requirements.txt`
+
+Luego hacer `Manage app → Reboot app`.
