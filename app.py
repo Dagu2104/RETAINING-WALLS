@@ -203,6 +203,191 @@ with col_der:
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Geometría", "Fuerzas", "Trial Wedge", "Armado fuste", "Zapata", "Dentellón y deslizamiento", "Detalle general"])
 
         with tab1:
+            st.subheader("Resumen rápido del diseño")
+
+            # Se calculan aquí los estados principales para que el usuario no tenga
+            # que entrar a cada pestaña solo para saber si el diseño cumple.
+            try:
+                resultado_fuste_inicio = fm.calcular_diseno_fuste_dinamico(
+                    datos,
+                    numero_cunas=numero_cunas,
+                    recubrimiento_cm=recubrimiento_cm,
+                    diametro_vertical_mm=float(diametro_vertical_mm),
+                    diametro_horizontal_mm=float(diametro_horizontal_mm),
+                    separacion_max_cm=separacion_max_cm
+                )
+
+                resultado_zapata_inicio = fm.calcular_diseno_zapata_definitivo(
+                    datos,
+                    numero_cunas=numero_cunas,
+                    recubrimiento_cm=recubrimiento_cm,
+                    diametro_puntera_mm=float(diametro_puntera_mm),
+                    diametro_talon_mm=float(diametro_talon_mm),
+                    separacion_max_cm=separacion_max_cm
+                )
+
+                resultado_dentellon_inicio = fm.calcular_deslizamiento_y_llave(
+                    datos,
+                    numero_cunas=numero_cunas,
+                    recubrimiento_cm=recubrimiento_cm,
+                    diametro_llave_mm=float(diametro_llave_mm),
+                    separacion_max_cm=separacion_max_cm,
+                    diametro_estribo_mm=float(diametro_estribo_dentellon_mm)
+                )
+
+                def estado_es_ok(valor):
+                    txt = str(valor).lower()
+                    if "no cumple" in txt or "revisar" in txt or "error" in txt:
+                        return False
+                    return True
+
+                def tarjeta_estado(titulo, valor, detalle=""):
+                    ok = estado_es_ok(valor)
+                    color = "#16a34a" if ok else "#dc2626"
+                    fondo = "#ecfdf5" if ok else "#fef2f2"
+                    borde = "#86efac" if ok else "#fecaca"
+                    icono = "✅" if ok else "⚠️"
+                    return f"""
+                    <div style="
+                        border:1px solid {borde};
+                        background:{fondo};
+                        border-radius:14px;
+                        padding:14px 16px;
+                        min-height:112px;
+                        box-shadow:0 1px 3px rgba(0,0,0,0.06);
+                    ">
+                        <div style="font-size:14px;color:#475569;margin-bottom:8px;">{titulo}</div>
+                        <div style="font-size:26px;font-weight:800;color:{color};line-height:1.1;">{icono} {valor}</div>
+                        <div style="font-size:13px;color:#64748b;margin-top:8px;">{detalle}</div>
+                    </div>
+                    """
+
+                presiones_inicio = resultado_zapata_inicio["presiones"]
+
+                estados_dashboard = [
+                    {
+                        "Grupo": "Estabilidad externa",
+                        "Verificación": "Presión admisible del suelo",
+                        "Estado": presiones_inicio["estado_q"],
+                        "Detalle": f"qmax = {presiones_inicio['qmax_ton_m2']:.2f} ton/m² / qa = {presiones_inicio['q_adm_ton_m2']:.2f} ton/m²",
+                    },
+                    {
+                        "Grupo": "Pantalla / fuste",
+                        "Verificación": "Flexión del fuste",
+                        "Estado": "OK" if resultado_fuste_inicio["As_vertical_prov_cm2_m"] >= resultado_fuste_inicio["As_vertical_req_cm2_m"] else "Revisar",
+                        "Detalle": f"As prov. = {resultado_fuste_inicio['As_vertical_prov_cm2_m']:.2f} cm²/m / As req. = {resultado_fuste_inicio['As_vertical_req_cm2_m']:.2f} cm²/m",
+                    },
+                    {
+                        "Grupo": "Pantalla / fuste",
+                        "Verificación": "Cortante del fuste",
+                        "Estado": resultado_fuste_inicio["estado_cortante"],
+                        "Detalle": f"Vu = {resultado_fuste_inicio['Vu_ton_m']:.2f} ton/m / φVc = {resultado_fuste_inicio['phi_Vc_ton_m']:.2f} ton/m",
+                    },
+                    {
+                        "Grupo": "Zapata",
+                        "Verificación": "Estado global de zapata",
+                        "Estado": resultado_zapata_inicio["estado_global_zapata"],
+                        "Detalle": "Incluye flexión, cortante, presión de contacto y anclaje.",
+                    },
+                    {
+                        "Grupo": "Zapata",
+                        "Verificación": "Cortante puntera",
+                        "Estado": resultado_zapata_inicio["cortante_puntera"]["estado"],
+                        "Detalle": f"Vu/φVc = {resultado_zapata_inicio['cortante_puntera']['relacion']:.2f}",
+                    },
+                    {
+                        "Grupo": "Zapata",
+                        "Verificación": "Cortante talón",
+                        "Estado": resultado_zapata_inicio["cortante_talon"]["estado"],
+                        "Detalle": f"Vu/φVc = {resultado_zapata_inicio['cortante_talon']['relacion']:.2f}",
+                    },
+                    {
+                        "Grupo": "Zapata",
+                        "Verificación": "Anclaje puntera",
+                        "Estado": resultado_zapata_inicio["estado_ld_puntera"],
+                        "Detalle": f"ld = {resultado_zapata_inicio['ld_puntera_cm']:.1f} cm / disp. = {resultado_zapata_inicio['longitud_disponible_puntera_cm']:.1f} cm",
+                    },
+                    {
+                        "Grupo": "Zapata",
+                        "Verificación": "Anclaje talón",
+                        "Estado": resultado_zapata_inicio["estado_ld_talon"],
+                        "Detalle": f"ld = {resultado_zapata_inicio['ld_talon_cm']:.1f} cm / disp. = {resultado_zapata_inicio['longitud_disponible_talon_cm']:.1f} cm",
+                    },
+                    {
+                        "Grupo": "Dentellón",
+                        "Verificación": "Deslizamiento",
+                        "Estado": resultado_dentellon_inicio["estado_deslizamiento"],
+                        "Detalle": f"R/H = {resultado_dentellon_inicio['FS_deslizamiento']:.2f}",
+                    },
+                    {
+                        "Grupo": "Dentellón",
+                        "Verificación": "Armado dentellón",
+                        "Estado": resultado_dentellon_inicio["estado_armado_dentellon"],
+                        "Detalle": resultado_dentellon_inicio["criterio_armado_dentellon"],
+                    },
+                ]
+
+                cumple_todo = all(estado_es_ok(e["Estado"]) for e in estados_dashboard)
+                estado_general = "DISEÑO CUMPLE" if cumple_todo else "DISEÑO CON OBSERVACIONES"
+                color_general = "#16a34a" if cumple_todo else "#dc2626"
+                fondo_general = "#ecfdf5" if cumple_todo else "#fef2f2"
+                borde_general = "#86efac" if cumple_todo else "#fecaca"
+                icono_general = "✅" if cumple_todo else "⚠️"
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        border:2px solid {borde_general};
+                        background:{fondo_general};
+                        border-radius:18px;
+                        padding:18px 22px;
+                        margin-bottom:18px;
+                        box-shadow:0 2px 6px rgba(0,0,0,0.08);
+                    ">
+                        <div style="font-size:15px;color:#475569;margin-bottom:6px;">Estado global del modelo actual</div>
+                        <div style="font-size:34px;font-weight:900;color:{color_general};line-height:1.1;">{icono_general} {estado_general}</div>
+                        <div style="font-size:14px;color:#64748b;margin-top:8px;">
+                            Resumen automático de estabilidad, fuste, zapata, anclajes, deslizamiento y dentellón.
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                c1, c2, c3, c4 = st.columns(4)
+                metricas = [
+                    ("qmax", f"{presiones_inicio['qmax_ton_m2']:.2f}", "ton/m²"),
+                    ("qa", f"{presiones_inicio['q_adm_ton_m2']:.2f}", "ton/m²"),
+                    ("R/H", f"{resultado_dentellon_inicio['FS_deslizamiento']:.2f}", "deslizamiento"),
+                    ("PA", f"{resultado_fuste_inicio['PA_ton_m']:.2f}", "ton/m"),
+                ]
+                for col, met in zip([c1, c2, c3, c4], metricas):
+                    with col:
+                        st.metric(met[0], met[1], met[2])
+
+                st.markdown("#### Semáforo de verificaciones")
+                cols = st.columns(3)
+                for idx_estado, item in enumerate(estados_dashboard):
+                    with cols[idx_estado % 3]:
+                        st.markdown(
+                            tarjeta_estado(
+                                item["Verificación"],
+                                item["Estado"],
+                                item["Detalle"]
+                            ),
+                            unsafe_allow_html=True
+                        )
+
+                with st.expander("Ver tabla resumen de verificaciones"):
+                    st.dataframe(estados_dashboard, use_container_width=True, hide_index=True)
+
+            except Exception as e:
+                st.warning("No se pudo generar el resumen automático. Revisa los datos de entrada o entra a cada pestaña para ver el error específico.")
+                st.code(str(e))
+
+            st.divider()
+            st.subheader("Geometría del muro")
+
             fig, ax = plt.subplots(figsize=(8.2, 5.6), dpi=130)
             fm.dibujar_muro(
                 ax,

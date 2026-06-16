@@ -379,3 +379,20 @@ Se eliminó el dibujo de barras laterales como puntos dentro del dentellón. Aho
 - el acero mínimo longitudinal se muestra solo en los extremos de la sección;
 - el estribo cerrado sube hasta el top de la zapata;
 - si la profundidad del dentellón es mayor a 0.80 m, solo se muestra una nota indicando que debe incluirse acero adicional distribuido en las caras laterales para control de agrietamiento.
+
+
+## Dashboard inicial de verificaciones
+
+Se agregó en la primera pestaña un resumen tipo semáforo para que el usuario vea rápidamente si el diseño cumple o requiere revisión, sin entrar pestaña por pestaña.
+
+El resumen incluye:
+
+- presión admisible del suelo;
+- flexión y cortante del fuste;
+- estado global de zapata;
+- cortante de puntera y talón;
+- anclaje de puntera y talón;
+- deslizamiento;
+- armado del dentellón.
+
+Si todo está correcto se muestra `DISEÑO CUMPLE`. Si alguna revisión falla se muestra `DISEÑO CON OBSERVACIONES`.
