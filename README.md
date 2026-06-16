@@ -441,3 +441,68 @@ Se corrigieron/ajustaron los puntos observados:
 - La tabla de zapata ya no usa anclaje como estado global.
 - En cortante de puntera/talón, si no existe sección crítica porque L≤d, se indica `No aplica` en lugar de mostrar un OK engañoso con Vu/φVc = 0.
 - El valor de φVc del fuste depende del peralte efectivo d, por lo que cambia al modificar el espesor de base del fuste.
+
+
+## Separaciones manuales de armado
+
+Se agregaron controles para ingresar directamente la separación de barras:
+
+- separación vertical del fuste;
+- separación horizontal del fuste;
+- separación de puntera;
+- separación de talón.
+
+La app ya no solo calcula una separación automática. Ahora usa la separación ingresada para obtener:
+
+```text
+As provisto = Ab * 100 / s
+```
+
+y compara `As provisto` contra `As requerido`.
+
+En la pestaña Zapata también se agregaron métricas superiores para mostrar el armado:
+
+- As puntera requerido;
+- Ø puntera @ separación;
+- As talón requerido;
+- Ø talón @ separación.
+
+
+## Separación única de zapata
+
+Se reemplazaron los campos separados:
+
+- Separación puntera;
+- Separación talón.
+
+Ahora existe un solo campo:
+
+```text
+Separación zapata [cm]
+```
+
+Ese valor se aplica simultáneamente al armado de la puntera y al armado del talón. Los diámetros pueden seguir siendo diferentes, pero la separación es común porque ambos forman parte de la misma zapata.
+
+
+## Armado de zapata por cara superior e inferior
+
+Se corrigió el criterio de entrada del armado de zapata.
+
+Antes se manejaba como:
+
+- diámetro puntera;
+- diámetro talón;
+- una separación común de zapata.
+
+Ahora se maneja por **caras del elemento zapata**:
+
+- diámetro acero inferior zapata;
+- separación acero inferior zapata;
+- diámetro acero superior zapata;
+- separación acero superior zapata.
+
+Internamente:
+- la puntera se asocia al acero inferior;
+- el talón se asocia al acero superior.
+
+Esto permite que una cara tenga mayor acero que la otra cuando el momento crítico sea distinto.

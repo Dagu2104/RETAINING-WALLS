@@ -113,27 +113,58 @@ diametro_vertical_mm = st.sidebar.selectbox(
     [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
     index=3
 )
+sep_vertical_fuste_cm = st.sidebar.number_input(
+    "Separación vertical fuste [cm]",
+    min_value=5.0,
+    max_value=40.0,
+    value=15.0,
+    step=2.5
+)
 diametro_horizontal_mm = st.sidebar.selectbox(
     "Diámetro barra horizontal [mm]",
     [10, 12, 14, 16, 18, 20, 22, 25],
     index=1
 )
-separacion_max_cm = st.sidebar.number_input(
-    "Separación máxima permitida [cm]",
-    min_value=10.0,
-    value=30.0,
+sep_horizontal_fuste_cm = st.sidebar.number_input(
+    "Separación horizontal fuste [cm]",
+    min_value=5.0,
+    max_value=40.0,
+    value=20.0,
     step=2.5
 )
-
-diametro_puntera_mm = st.sidebar.selectbox(
-    "Diámetro barra puntera [mm]",
-    [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
-    index=3
+separacion_max_cm = st.sidebar.number_input(
+    "Separación máxima automática [cm]",
+    min_value=10.0,
+    value=30.0,
+    step=2.5,
+    help="Solo se usa como límite cuando la app calcula separaciones automáticas. Las separaciones manuales ingresadas arriba se revisan con As provisto."
 )
-diametro_talon_mm = st.sidebar.selectbox(
-    "Diámetro barra talón [mm]",
+
+diametro_zapata_inferior_mm = st.sidebar.selectbox(
+    "Diámetro acero inferior zapata [mm]",
     [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
-    index=3
+    index=3,
+    help="Se aplica al acero inferior de la zapata. Normalmente controla la puntera."
+)
+sep_zapata_inferior_cm = st.sidebar.number_input(
+    "Separación acero inferior zapata [cm]",
+    min_value=5.0,
+    max_value=40.0,
+    value=20.0,
+    step=2.5
+)
+diametro_zapata_superior_mm = st.sidebar.selectbox(
+    "Diámetro acero superior zapata [mm]",
+    [10, 12, 14, 16, 18, 20, 22, 25, 28, 32],
+    index=3,
+    help="Se aplica al acero superior de la zapata. Normalmente controla el talón."
+)
+sep_zapata_superior_cm = st.sidebar.number_input(
+    "Separación acero superior zapata [cm]",
+    min_value=5.0,
+    max_value=40.0,
+    value=20.0,
+    step=2.5
 )
 diametro_llave_mm = st.sidebar.selectbox(
     "Diámetro longitudinal dentellón [mm]",
@@ -214,16 +245,20 @@ with col_der:
                     recubrimiento_cm=recubrimiento_cm,
                     diametro_vertical_mm=float(diametro_vertical_mm),
                     diametro_horizontal_mm=float(diametro_horizontal_mm),
-                    separacion_max_cm=separacion_max_cm
+                    separacion_max_cm=separacion_max_cm,
+                    sep_vertical_manual_cm=sep_vertical_fuste_cm,
+                    sep_horizontal_manual_cm=sep_horizontal_fuste_cm
                 )
 
                 resultado_zapata_inicio = fm.calcular_diseno_zapata_definitivo(
                     datos,
                     numero_cunas=numero_cunas,
                     recubrimiento_cm=recubrimiento_cm,
-                    diametro_puntera_mm=float(diametro_puntera_mm),
-                    diametro_talon_mm=float(diametro_talon_mm),
-                    separacion_max_cm=separacion_max_cm
+                    diametro_puntera_mm=float(diametro_zapata_inferior_mm),
+                    diametro_talon_mm=float(diametro_zapata_superior_mm),
+                    separacion_max_cm=separacion_max_cm,
+                    sep_puntera_manual_cm=sep_zapata_inferior_cm,
+                    sep_talon_manual_cm=sep_zapata_superior_cm
                 )
 
                 resultado_dentellon_inicio = fm.calcular_deslizamiento_y_llave(
@@ -475,7 +510,7 @@ with col_der:
 
             st.caption(
                 "El armado se recalcula dinámicamente con la geometría, propiedades del suelo, f'c, fy, "
-                "diámetros seleccionados y PA obtenido por Trial Wedge."
+                "diámetros y separaciones ingresadas. La app compara As provisto contra As requerido."
             )
 
 
@@ -484,8 +519,8 @@ with col_der:
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
-                diametro_puntera_mm=float(diametro_puntera_mm),
-                diametro_talon_mm=float(diametro_talon_mm),
+                diametro_puntera_mm=float(diametro_zapata_inferior_mm),
+                diametro_talon_mm=float(diametro_zapata_superior_mm),
                 separacion_max_cm=separacion_max_cm
             )
 
@@ -496,6 +531,23 @@ with col_der:
             col_z2.metric("qmax", f"{presiones['qmax_ton_m2']:.2f} ton/m²")
             col_z3.metric("Mu puntera", f"{resultado_zapata['Mu_puntera_ton_m_m']:.3f} ton·m/m")
             col_z4.metric("Mu talón", f"{resultado_zapata['Mu_talon_ton_m_m']:.3f} ton·m/m")
+
+            col_za1, col_za2, col_za3, col_za4 = st.columns(4)
+            col_za1.metric("As inferior req.", f"{resultado_zapata['As_puntera_req_cm2_m']:.2f} cm²/m")
+            col_za2.metric(
+                "Armado inferior",
+                f"Ø{resultado_zapata['diametro_puntera_mm']:.0f} @ {resultado_zapata['sep_puntera_cm']:.1f} cm"
+            )
+            col_za3.metric("As superior req.", f"{resultado_zapata['As_talon_req_cm2_m']:.2f} cm²/m")
+            col_za4.metric(
+                "Armado superior",
+                f"Ø{resultado_zapata['diametro_talon_mm']:.0f} @ {resultado_zapata['sep_talon_cm']:.1f} cm"
+            )
+
+            st.caption(
+                "El armado de la zapata se controla por caras: acero inferior y acero superior. "
+                "La puntera usa el acero inferior y el talón usa el acero superior, porque los momentos críticos pueden estar en caras opuestas."
+            )
 
             st.subheader("1. Presiones de contacto")
             st.dataframe(fm.tabla_presiones_contacto(presiones), use_container_width=True, hide_index=True)
@@ -606,8 +658,8 @@ with col_der:
                 datos,
                 numero_cunas=numero_cunas,
                 recubrimiento_cm=recubrimiento_cm,
-                diametro_puntera_mm=float(diametro_puntera_mm),
-                diametro_talon_mm=float(diametro_talon_mm),
+                diametro_puntera_mm=float(diametro_zapata_inferior_mm),
+                diametro_talon_mm=float(diametro_zapata_superior_mm),
                 separacion_max_cm=separacion_max_cm
             )
 

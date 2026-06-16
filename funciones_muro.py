@@ -3604,3 +3604,417 @@ def tabla_momentos_estabilidad(presiones: dict) -> pd.DataFrame:
         ("e", "", "", presiones.get("e_m", 0.0)),
     ]
     return pd.DataFrame(filas, columns=["Concepto", "Fuerza [ton/m]", "Brazo x o y [m]", "Momento [ton·m/m]"])
+
+
+# =============================================================================
+# OVERRIDES - Separación manual de armado
+# =============================================================================
+
+def _as_prov_por_separacion(diametro_mm: float, separacion_cm: float) -> float:
+    if separacion_cm <= 0 or not math.isfinite(separacion_cm):
+        return 0.0
+    return area_barra_cm2(diametro_mm) * 100.0 / separacion_cm
+
+
+def _estado_acero_manual(As_req: float, As_prov: float) -> str:
+    if not math.isfinite(As_req):
+        return "No cumple: aumentar sección/refuerzo"
+    if As_req <= 0:
+        return "No aplica"
+    return "OK" if As_prov >= As_req else "No cumple"
+
+
+def calcular_diseno_fuste_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_vertical_mm: float = 16.0,
+    diametro_horizontal_mm: float = 12.0,
+    separacion_max_cm: float = 30.0,
+    sep_vertical_manual_cm: float | None = None,
+    sep_horizontal_manual_cm: float | None = None
+) -> dict:
+    """
+    Diseño dinámico del fuste con separación manual.
+
+    Si se ingresa `sep_vertical_manual_cm` o `sep_horizontal_manual_cm`,
+    esa separación se usa directamente para calcular As provisto.
+    """
+    geometria = generar_puntos_muro(datos)
+    tabla_trial, resultado_trial = calcular_trial_wedge_activo(datos, geometria, numero_cunas=numero_cunas)
+
+    PA = resultado_trial["PA_ton_m"]
+    delta_rad = math.radians(resultado_trial["delta_grados"])
+    PA_h = PA * math.cos(delta_rad)
+
+    h_activa = altura_relleno_en_muro(datos, geometria) if "altura_relleno_en_muro" in globals() else max(0.0, min(datos.altura_relleno, datos.H))
+    brazo = h_activa / 3.0 if h_activa > 0 else 0.0
+
+    gamma_p = 1.50
+    Mu_ton_m = gamma_p * PA_h * brazo
+    Vu_ton = gamma_p * PA_h
+
+    b_cm = 100.0
+    h_cm = datos.t_base * 100.0
+    d_cm = max(h_cm - recubrimiento_cm - (diametro_vertical_mm / 10.0) / 2.0, 1.0)
+
+    As_flexion = resolver_as_flexion_rectangular(Mu_ton_m, b_cm, d_cm, datos.fc, datos.fy)
+    As_temp_total = 0.0018 * b_cm * h_cm
+    As_temp_cara = As_temp_total / 2.0
+    As_vertical_req = max(As_flexion, As_temp_cara) if math.isfinite(As_flexion) else float("inf")
+
+    if sep_vertical_manual_cm is None:
+        sep_vertical_cm, As_vertical_prov = seleccionar_separacion(
+            area_barra_cm2(diametro_vertical_mm), As_vertical_req, separacion_max_cm
+        )
+        modo_sep_vertical = "Automática"
+    else:
+        sep_vertical_cm = float(sep_vertical_manual_cm)
+        As_vertical_prov = _as_prov_por_separacion(diametro_vertical_mm, sep_vertical_cm)
+        modo_sep_vertical = "Manual"
+
+    As_horizontal_req = As_temp_cara
+    if sep_horizontal_manual_cm is None:
+        sep_horizontal_cm, As_horizontal_prov = seleccionar_separacion(
+            area_barra_cm2(diametro_horizontal_mm), As_horizontal_req, separacion_max_cm
+        )
+        modo_sep_horizontal = "Automática"
+    else:
+        sep_horizontal_cm = float(sep_horizontal_manual_cm)
+        As_horizontal_prov = _as_prov_por_separacion(diametro_horizontal_mm, sep_horizontal_cm)
+        modo_sep_horizontal = "Manual"
+
+    cort = verificar_cortante_rectangular(Vu_ton, b_cm, d_cm, datos.fc)
+    q_base_ton_m2 = PA_h / h_activa if h_activa > 0 else 0.0
+    estado_flexion = _estado_acero_manual(As_vertical_req, As_vertical_prov)
+    estado_horizontal = _estado_acero_manual(As_horizontal_req, As_horizontal_prov)
+
+    return {
+        "PA_ton_m": PA,
+        "delta_grados": resultado_trial["delta_grados"],
+        "alfa_critico_grados": resultado_trial.get("alfa_grados", resultado_trial.get("alfa_critico_grados", 0.0)),
+        "q_base_ton_m2": q_base_ton_m2,
+        "altura_activa_relleno_m": h_activa,
+        "brazo_activo_m": brazo,
+        "Mu_ton_m_m": Mu_ton_m,
+        "Vu_ton_m": Vu_ton,
+        "b_cm": b_cm,
+        "h_cm": h_cm,
+        "d_cm": d_cm,
+        "As_flexion_cm2_m": As_flexion,
+        "As_temp_total_cm2_m": As_temp_total,
+        "As_temp_cara_cm2_m": As_temp_cara,
+        "As_vertical_req_cm2_m": As_vertical_req,
+        "diametro_vertical_mm": diametro_vertical_mm,
+        "separacion_vertical_cm": sep_vertical_cm,
+        "As_vertical_prov_cm2_m": As_vertical_prov,
+        "modo_sep_vertical": modo_sep_vertical,
+        "estado_flexion": estado_flexion,
+        "diametro_horizontal_mm": diametro_horizontal_mm,
+        "As_horizontal_req_cm2_m": As_horizontal_req,
+        "separacion_horizontal_cm": sep_horizontal_cm,
+        "As_horizontal_prov_cm2_m": As_horizontal_prov,
+        "modo_sep_horizontal": modo_sep_horizontal,
+        "estado_horizontal": estado_horizontal,
+        "phi_Vc_ton_m": cort["phi_Vc_ton_m"],
+        "relacion_cortante": cort["relacion"],
+        "estado_cortante": cort["estado"],
+        "tabla_trial": tabla_trial,
+        "resultado_trial": resultado_trial,
+    }
+
+
+def tabla_diseno_fuste(resultado: dict) -> pd.DataFrame:
+    filas = [
+        ("PA dinámico", resultado["PA_ton_m"], "ton/m"),
+        ("δ asumido", resultado["delta_grados"], "grados"),
+        ("α crítico", resultado["alfa_critico_grados"], "grados"),
+        ("q base", resultado["q_base_ton_m2"], "ton/m²"),
+        ("Altura activa de relleno", resultado.get("altura_activa_relleno_m", 0.0), "m"),
+        ("Brazo activo", resultado.get("brazo_activo_m", 0.0), "m"),
+        ("Mu fuste", resultado["Mu_ton_m_m"], "ton·m/m"),
+        ("Vu fuste", resultado["Vu_ton_m"], "ton/m"),
+        ("Peralte efectivo d", resultado["d_cm"], "cm"),
+        ("As por flexión", resultado["As_flexion_cm2_m"], "cm²/m"),
+        ("As temperatura por cara", resultado["As_temp_cara_cm2_m"], "cm²/m"),
+        ("As vertical requerido", resultado["As_vertical_req_cm2_m"], "cm²/m"),
+        ("As vertical provisto", resultado["As_vertical_prov_cm2_m"], "cm²/m"),
+        ("Separación vertical", resultado["separacion_vertical_cm"], "cm"),
+        ("Modo separación vertical", resultado.get("modo_sep_vertical", "Automática"), "-"),
+        ("Estado flexión vertical", resultado.get("estado_flexion", "-"), "-"),
+        ("As horizontal requerido", resultado["As_horizontal_req_cm2_m"], "cm²/m"),
+        ("As horizontal provisto", resultado["As_horizontal_prov_cm2_m"], "cm²/m"),
+        ("Separación horizontal", resultado["separacion_horizontal_cm"], "cm"),
+        ("Modo separación horizontal", resultado.get("modo_sep_horizontal", "Automática"), "-"),
+        ("Estado acero horizontal", resultado.get("estado_horizontal", "-"), "-"),
+        ("φVc fuste", resultado["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc", resultado.get("relacion_cortante", 0.0), "-"),
+        ("Estado cortante", resultado["estado_cortante"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Parámetro", "Valor", "Unidad"])
+
+
+def calcular_diseno_zapata_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0,
+    sep_puntera_manual_cm: float | None = None,
+    sep_talon_manual_cm: float | None = None
+) -> dict:
+    """
+    Diseño preliminar de zapata con separación manual para puntera y talón.
+    """
+    presiones = calcular_presiones_contacto_servicio(datos, numero_cunas=numero_cunas)
+    gamma_u = 1.50
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+
+    Lp = max(datos.puntera, 0.0)
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    q1 = presion_lineal_en_x(datos, presiones, datos.puntera)
+    q_prom_p = (q0 + q1) / 2.0 if Lp > 0 else 0.0
+    Mu_puntera = gamma_u * q_prom_p * Lp ** 2 / 2.0
+    Vu_puntera = gamma_u * q_prom_p * Lp
+
+    Lt = max(calcular_talon(datos), 0.0)
+    x_t0 = datos.puntera + datos.t_base
+    x_t1 = datos.B
+    q_t0 = presion_lineal_en_x(datos, presiones, x_t0)
+    q_t1 = presion_lineal_en_x(datos, presiones, x_t1)
+    q_prom_t = (q_t0 + q_t1) / 2.0 if Lt > 0 else 0.0
+
+    geom = generar_puntos_muro(datos)
+    soil = suelo_sobre_talon(datos, geom) if "suelo_sobre_talon" in globals() else {"W_ton_m": datos.gamma_suelo * datos.altura_relleno * Lt}
+    w_suelo_prom = soil["W_ton_m"] / Lt if Lt > 0 else 0.0
+    w_neto_talon = w_suelo_prom - q_prom_t
+
+    Mu_talon_firmado = gamma_u * w_neto_talon * Lt ** 2 / 2.0
+    Vu_talon_firmado = gamma_u * w_neto_talon * Lt
+    Mu_talon = abs(Mu_talon_firmado)
+    Vu_talon = abs(Vu_talon_firmado)
+
+    d_puntera_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_talon_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+
+    As_puntera = resolver_as_flexion_rectangular(Mu_puntera, b_cm, d_puntera_cm, datos.fc, datos.fy) if Lp > 0 else 0.0
+    As_talon = resolver_as_flexion_rectangular(Mu_talon, b_cm, d_talon_cm, datos.fc, datos.fy) if Lt > 0 else 0.0
+
+    As_temp_zapata = 0.0018 * b_cm * h_cm / 2.0
+    As_puntera_req = max(As_puntera, As_temp_zapata) if Lp > 0 else 0.0
+    As_talon_req = max(As_talon, As_temp_zapata) if Lt > 0 else 0.0
+
+    if sep_puntera_manual_cm is None:
+        sep_puntera_cm_calc, As_puntera_prov = seleccionar_separacion(area_barra_cm2(diametro_puntera_mm), As_puntera_req, separacion_max_cm)
+        modo_sep_puntera = "Automática"
+    else:
+        sep_puntera_cm_calc = float(sep_puntera_manual_cm)
+        As_puntera_prov = _as_prov_por_separacion(diametro_puntera_mm, sep_puntera_cm_calc) if Lp > 0 else 0.0
+        modo_sep_puntera = "Manual"
+
+    if sep_talon_manual_cm is None:
+        sep_talon_cm_calc, As_talon_prov = seleccionar_separacion(area_barra_cm2(diametro_talon_mm), As_talon_req, separacion_max_cm)
+        modo_sep_talon = "Automática"
+    else:
+        sep_talon_cm_calc = float(sep_talon_manual_cm)
+        As_talon_prov = _as_prov_por_separacion(diametro_talon_mm, sep_talon_cm_calc) if Lt > 0 else 0.0
+        modo_sep_talon = "Manual"
+
+    return {
+        "presiones": presiones,
+        "Lp_m": Lp,
+        "Lt_m": Lt,
+        "q_puntera_prom_ton_m2": q_prom_p,
+        "q_talon_prom_ton_m2": q_prom_t,
+        "w_suelo_talon_ton_m2": w_suelo_prom,
+        "w_neto_talon_ton_m2": w_neto_talon,
+        "Mu_puntera_ton_m_m": Mu_puntera,
+        "Vu_puntera_ton_m": Vu_puntera,
+        "Mu_talon_ton_m_m": Mu_talon,
+        "Mu_talon_firmado_ton_m_m": Mu_talon_firmado,
+        "Vu_talon_ton_m": Vu_talon,
+        "Vu_talon_firmado_ton_m": Vu_talon_firmado,
+        "As_puntera_req_cm2_m": As_puntera_req,
+        "As_puntera_prov_cm2_m": As_puntera_prov,
+        "sep_puntera_cm": sep_puntera_cm_calc,
+        "modo_sep_puntera": modo_sep_puntera,
+        "As_talon_req_cm2_m": As_talon_req,
+        "As_talon_prov_cm2_m": As_talon_prov,
+        "sep_talon_cm": sep_talon_cm_calc,
+        "modo_sep_talon": modo_sep_talon,
+        "diametro_puntera_mm": diametro_puntera_mm,
+        "diametro_talon_mm": diametro_talon_mm,
+    }
+
+
+def calcular_diseno_zapata_definitivo(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0,
+    sep_puntera_manual_cm: float | None = None,
+    sep_talon_manual_cm: float | None = None
+) -> dict:
+    """
+    Diseño de zapata con separación manual para puntera y talón.
+    """
+    res = calcular_diseno_zapata_dinamico(
+        datos,
+        numero_cunas,
+        recubrimiento_cm,
+        diametro_puntera_mm,
+        diametro_talon_mm,
+        separacion_max_cm,
+        sep_puntera_manual_cm,
+        sep_talon_manual_cm
+    )
+    presiones = res["presiones"]
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+    d_puntera_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_talon_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+    d_puntera_m = d_puntera_cm / 100.0
+    d_talon_m = d_talon_cm / 100.0
+    gamma_u = 1.50
+
+    Lp = max(datos.puntera, 0.0)
+    Lp_crit = max(Lp - d_puntera_m, 0.0)
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    qcrit_p = presion_lineal_en_x(datos, presiones, Lp_crit)
+    q_prom_crit_p = (q0 + qcrit_p) / 2.0 if Lp_crit > 0 else 0.0
+    Vu_puntera_crit = gamma_u * q_prom_crit_p * Lp_crit
+    cortante_puntera = _cortante_o_no_aplica(Vu_puntera_crit, b_cm, d_puntera_cm, datos.fc, Lp_crit, "Lp")
+
+    Lt = max(calcular_talon(datos), 0.0)
+    Lt_crit = max(Lt - d_talon_m, 0.0)
+    x_inicio_talon_crit = datos.puntera + datos.t_base + d_talon_m
+    x_fin_talon = datos.B
+    q_tcrit = presion_lineal_en_x(datos, presiones, x_inicio_talon_crit)
+    q_tfin = presion_lineal_en_x(datos, presiones, x_fin_talon)
+    q_prom_tcrit = (q_tcrit + q_tfin) / 2.0 if Lt_crit > 0 else 0.0
+
+    geom = generar_puntos_muro(datos)
+    soil = suelo_sobre_talon(datos, geom) if "suelo_sobre_talon" in globals() else {"W_ton_m": datos.gamma_suelo * datos.altura_relleno * Lt}
+    w_suelo_prom = soil["W_ton_m"] / Lt if Lt > 0 else 0.0
+    w_neto = w_suelo_prom - q_prom_tcrit
+    Vu_talon_crit = gamma_u * abs(w_neto) * Lt_crit
+    cortante_talon = _cortante_o_no_aplica(Vu_talon_crit, b_cm, d_talon_cm, datos.fc, Lt_crit, "Lt")
+
+    estado_as_puntera = _estado_acero_manual(res["As_puntera_req_cm2_m"], res["As_puntera_prov_cm2_m"]) if Lp > 0 else "No aplica"
+    estado_as_talon = _estado_acero_manual(res["As_talon_req_cm2_m"], res["As_talon_prov_cm2_m"]) if Lt > 0 else "No aplica"
+
+    def falla(e):
+        txt = str(e).lower()
+        return txt.startswith("no cumple") or "revisar" in txt
+
+    estados = [presiones["estado_q"], cortante_puntera["estado"], cortante_talon["estado"], estado_as_puntera, estado_as_talon]
+    estado_global = "Revisar" if any(falla(e) for e in estados) else "OK"
+
+    res.update({
+        "d_puntera_cm": d_puntera_cm,
+        "d_talon_cm": d_talon_cm,
+        "Lp_crit_m": Lp_crit,
+        "Lt_crit_m": Lt_crit,
+        "Vu_puntera_crit_ton_m": Vu_puntera_crit,
+        "Vu_talon_crit_ton_m": Vu_talon_crit,
+        "cortante_puntera": cortante_puntera,
+        "cortante_talon": cortante_talon,
+        "estado_as_puntera": estado_as_puntera,
+        "estado_as_talon": estado_as_talon,
+        "ld_puntera_cm": 0.0,
+        "ld_talon_cm": 0.0,
+        "longitud_disponible_puntera_cm": 0.0,
+        "longitud_disponible_talon_cm": 0.0,
+        "estado_ld_puntera": "No se evalúa en dashboard",
+        "estado_ld_talon": "No se evalúa en dashboard",
+        "estado_global_zapata": estado_global,
+    })
+    return res
+
+
+def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
+    filas = [
+        ("Estado global zapata", resultado["estado_global_zapata"], "-"),
+        ("qmax", resultado["presiones"]["qmax_ton_m2"], "ton/m²"),
+        ("qmin", resultado["presiones"]["qmin_ton_m2"], "ton/m²"),
+        ("qa", resultado["presiones"]["q_adm_ton_m2"], "ton/m²"),
+        ("Estado presión admisible", resultado["presiones"]["estado_q"], "-"),
+
+        ("Mu puntera", resultado["Mu_puntera_ton_m_m"], "ton·m/m"),
+        ("As puntera requerido", resultado["As_puntera_req_cm2_m"], "cm²/m"),
+        ("As puntera provisto", resultado["As_puntera_prov_cm2_m"], "cm²/m"),
+        ("Armado puntera", _formato_armado(resultado["diametro_puntera_mm"], resultado["sep_puntera_cm"]), "mm @ cm"),
+        ("Modo separación puntera", resultado.get("modo_sep_puntera", "Automática"), "-"),
+        ("Estado flexión puntera", resultado.get("estado_as_puntera", "No aplica"), "-"),
+
+        ("Mu talón", resultado["Mu_talon_ton_m_m"], "ton·m/m"),
+        ("Mu talón firmado", resultado.get("Mu_talon_firmado_ton_m_m", 0.0), "ton·m/m"),
+        ("As talón requerido", resultado["As_talon_req_cm2_m"], "cm²/m"),
+        ("As talón provisto", resultado["As_talon_prov_cm2_m"], "cm²/m"),
+        ("Armado talón", _formato_armado(resultado["diametro_talon_mm"], resultado["sep_talon_cm"]), "mm @ cm"),
+        ("Modo separación talón", resultado.get("modo_sep_talon", "Automática"), "-"),
+        ("Estado flexión talón", resultado.get("estado_as_talon", "No aplica"), "-"),
+
+        ("Vu puntera crítico", resultado["Vu_puntera_crit_ton_m"], "ton/m"),
+        ("φVc puntera", resultado["cortante_puntera"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc puntera", resultado["cortante_puntera"]["relacion"], "-"),
+        ("Estado cortante puntera", resultado["cortante_puntera"]["estado"], "-"),
+
+        ("Vu talón crítico", resultado["Vu_talon_crit_ton_m"], "ton/m"),
+        ("φVc talón", resultado["cortante_talon"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc talón", resultado["cortante_talon"]["relacion"], "-"),
+        ("Estado cortante talón", resultado["cortante_talon"]["estado"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
+
+
+# =============================================================================
+# OVERRIDE NOMENCLATURA ARMADO ZAPATA POR CARAS
+# =============================================================================
+def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
+    """
+    Tabla de zapata usando nomenclatura por caras:
+    - acero inferior de zapata;
+    - acero superior de zapata.
+
+    Internamente se conserva:
+    - puntera = acero inferior;
+    - talón = acero superior.
+    """
+    filas = [
+        ("Estado global zapata", resultado["estado_global_zapata"], "-"),
+        ("qmax", resultado["presiones"]["qmax_ton_m2"], "ton/m²"),
+        ("qmin", resultado["presiones"]["qmin_ton_m2"], "ton/m²"),
+        ("qa", resultado["presiones"]["q_adm_ton_m2"], "ton/m²"),
+        ("Estado presión admisible", resultado["presiones"]["estado_q"], "-"),
+
+        ("Mu puntera", resultado["Mu_puntera_ton_m_m"], "ton·m/m"),
+        ("As inferior requerido", resultado["As_puntera_req_cm2_m"], "cm²/m"),
+        ("As inferior provisto", resultado["As_puntera_prov_cm2_m"], "cm²/m"),
+        ("Armado inferior zapata", _formato_armado(resultado["diametro_puntera_mm"], resultado["sep_puntera_cm"]), "mm @ cm"),
+        ("Modo separación inferior", resultado.get("modo_sep_puntera", "Manual"), "-"),
+        ("Estado flexión acero inferior", resultado.get("estado_as_puntera", "No aplica"), "-"),
+
+        ("Mu talón", resultado["Mu_talon_ton_m_m"], "ton·m/m"),
+        ("Mu talón firmado", resultado.get("Mu_talon_firmado_ton_m_m", 0.0), "ton·m/m"),
+        ("As superior requerido", resultado["As_talon_req_cm2_m"], "cm²/m"),
+        ("As superior provisto", resultado["As_talon_prov_cm2_m"], "cm²/m"),
+        ("Armado superior zapata", _formato_armado(resultado["diametro_talon_mm"], resultado["sep_talon_cm"]), "mm @ cm"),
+        ("Modo separación superior", resultado.get("modo_sep_talon", "Manual"), "-"),
+        ("Estado flexión acero superior", resultado.get("estado_as_talon", "No aplica"), "-"),
+
+        ("Vu puntera crítico", resultado["Vu_puntera_crit_ton_m"], "ton/m"),
+        ("φVc puntera", resultado["cortante_puntera"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc puntera", resultado["cortante_puntera"]["relacion"], "-"),
+        ("Estado cortante puntera", resultado["cortante_puntera"]["estado"], "-"),
+
+        ("Vu talón crítico", resultado["Vu_talon_crit_ton_m"], "ton/m"),
+        ("φVc talón", resultado["cortante_talon"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc talón", resultado["cortante_talon"]["relacion"], "-"),
+        ("Estado cortante talón", resultado["cortante_talon"]["estado"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])
