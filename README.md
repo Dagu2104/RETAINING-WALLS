@@ -344,3 +344,22 @@ Se corrigió el criterio de diseño local del dentellón:
 - La vista en corte de la pantalla ahora muestra dos capas de acero:
   - cara posterior hacia el relleno;
   - cara frontal.
+
+
+## Fix AttributeError tabla_resumen_armado_dentellon
+
+Se corrigió el error:
+
+```text
+AttributeError: module 'funciones_muro' has no attribute 'tabla_resumen_armado_dentellon'
+```
+
+La app ahora verifica que la función exista antes de llamarla y el archivo `funciones_muro.py`
+incluye la función correspondiente. Para evitar errores en Streamlit Cloud, subir siempre juntos:
+
+- `app.py`
+- `funciones_muro.py`
+- `README.md`
+- `requirements.txt`
+
+Luego reiniciar la app desde **Manage app → Reboot app**.

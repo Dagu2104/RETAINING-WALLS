@@ -390,16 +390,22 @@ with col_der:
                 "El dentellón aumenta la altura pasiva disponible y por tanto incrementa PP."
             )
 
-            st.subheader("3. Detalle de armado del dentellón")
+            st.subheader("3. Criterio de diseño del dentellón")
             st.write(
-                "El dentellón se revisa como elemento en voladizo sometido a presión pasiva triangular. "
-                "Se calcula Mu, Vu, As requerido, As provisto, cortante y anclaje preliminar."
+                "El dentellón se revisa como llave de corte. Si es pequeño se considera monolítico con la zapata; "
+                "si requiere armado independiente, se colocan longitudinales mínimos tipo ACI y estribos calculados por cortante."
             )
 
             st.dataframe(fm.tabla_deslizamiento_llave(resultado_llave), use_container_width=True, hide_index=True)
 
             st.subheader("4. Resumen de armado del dentellón")
-            st.dataframe(fm.tabla_resumen_armado_dentellon(resultado_llave), use_container_width=True, hide_index=True)
+            if hasattr(fm, "tabla_resumen_armado_dentellon"):
+                st.dataframe(fm.tabla_resumen_armado_dentellon(resultado_llave), use_container_width=True, hide_index=True)
+            else:
+                st.warning(
+                    "No se encontró tabla_resumen_armado_dentellon() en funciones_muro.py. "
+                    "Sube también el archivo funciones_muro.py actualizado."
+                )
 
             st.subheader("5. Efecto de la ubicación del dentellón en momentos")
             if hasattr(fm, "tabla_momentos_estabilidad"):
