@@ -532,3 +532,24 @@ Se actualizó el criterio de diseño de la zapata:
   - si trabaja con tracción superior, la demanda entra al acero superior.
 - Se agregó la entrada `Altura de relleno sobre puntera [m]`.
 - Ese relleno se incluye como carga vertical sobre la puntera y puede reducir o invertir el momento de la puntera.
+
+
+## Corrección: momentos independientes en zapata
+
+Se corrigió el diseño de zapata para no usar solo la carga neta.
+
+Ahora se calculan momentos independientes por cada carga:
+
+- Puntera:
+  - reacción del suelo hacia arriba → acero inferior;
+  - relleno sobre puntera hacia abajo → acero superior.
+- Talón:
+  - reacción del suelo hacia arriba → acero inferior;
+  - relleno sobre talón hacia abajo → acero superior.
+
+Luego se suma la demanda que tracciona la misma cara y se diseña:
+
+- acero inferior de zapata;
+- acero superior de zapata.
+
+También se corrigieron las llamadas de la pestaña Zapata para que usen las separaciones manuales ingresadas por el usuario. Antes en esa pestaña se estaba usando la separación automática en algunas llamadas.

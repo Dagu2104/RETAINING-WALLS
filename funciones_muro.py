@@ -4728,3 +4728,301 @@ def tabla_momentos_estabilidad(presiones: dict) -> pd.DataFrame:
         ("e", "", "", presiones.get("e_m", 0.0)),
     ]
     return pd.DataFrame(filas, columns=["Concepto", "Fuerza [ton/m]", "Brazo x o y [m]", "Momento [ton·m/m]"])
+
+
+# =============================================================================
+# OVERRIDE FINAL - Momentos independientes por carga en zapata
+# =============================================================================
+
+def _momento_voladizo_uniforme(w_ton_m2: float, L_m: float, gamma_u: float = 1.50) -> float:
+    """
+    Momento absoluto de un voladizo con carga uniforme por metro de muro:
+    M = gamma * w * L² / 2
+    """
+    L = max(L_m, 0.0)
+    return gamma_u * max(w_ton_m2, 0.0) * L ** 2 / 2.0
+
+
+def calcular_diseno_zapata_dinamico(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0,
+    sep_puntera_manual_cm: float | None = None,
+    sep_talon_manual_cm: float | None = None
+) -> dict:
+    """
+    Diseño preliminar de zapata por caras, separando los momentos de cada carga.
+
+    Criterio corregido:
+    - No se usa solo la carga neta.
+    - Se calculan momentos independientes:
+        puntera: reacción del suelo -> inferior;
+        puntera: relleno sobre puntera -> superior;
+        talón: reacción del suelo -> inferior;
+        talón: relleno sobre talón -> superior.
+    - La cara inferior se diseña con el máximo/suma crítica de momentos que
+      traccionan abajo.
+    - La cara superior se diseña con el máximo/suma crítica de momentos que
+      traccionan arriba.
+
+    Para mantener un criterio conservador y simple, los momentos que traccionan
+    la misma cara se suman.
+    """
+    presiones = calcular_presiones_contacto_servicio(datos, numero_cunas=numero_cunas)
+    gamma_u = 1.50
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+    As_min_cara = 0.0018 * b_cm * h_cm / 2.0
+
+    Lp = max(datos.puntera, 0.0)
+    Lt = max(calcular_talon(datos), 0.0)
+
+    # -------------------------
+    # PUNTERA
+    # -------------------------
+    q0 = presion_lineal_en_x(datos, presiones, 0.0)
+    q1 = presion_lineal_en_x(datos, presiones, datos.puntera)
+    q_prom_p = (q0 + q1) / 2.0 if Lp > 0 else 0.0
+
+    suelo_punt = suelo_sobre_puntera(datos) if "suelo_sobre_puntera" in globals() else {
+        "w_ton_m2": max(float(getattr(datos, "altura_relleno_puntera", 0.0)), 0.0) * datos.gamma_suelo
+    }
+    w_puntera_down = suelo_punt["w_ton_m2"] if Lp > 0 else 0.0
+
+    # Reacción hacia arriba genera tracción inferior.
+    M_puntera_reaccion_inferior = _momento_voladizo_uniforme(q_prom_p, Lp, gamma_u)
+    # Relleno sobre puntera hacia abajo genera tracción superior.
+    M_puntera_relleno_superior = _momento_voladizo_uniforme(w_puntera_down, Lp, gamma_u)
+
+    # Momento firmado solo informativo: positivo = domina reacción; negativo = domina relleno.
+    Mu_puntera_firmado = M_puntera_reaccion_inferior - M_puntera_relleno_superior
+    Vu_puntera = gamma_u * abs(q_prom_p - w_puntera_down) * Lp
+
+    # -------------------------
+    # TALÓN
+    # -------------------------
+    x_t0 = datos.puntera + datos.t_base
+    x_t1 = datos.B
+    q_t0 = presion_lineal_en_x(datos, presiones, x_t0)
+    q_t1 = presion_lineal_en_x(datos, presiones, x_t1)
+    q_prom_t = (q_t0 + q_t1) / 2.0 if Lt > 0 else 0.0
+
+    geom = generar_puntos_muro(datos)
+    if "suelo_sobre_talon" in globals():
+        soil_t = suelo_sobre_talon(datos, geom)
+    else:
+        soil_t = {"W_ton_m": datos.gamma_suelo * datos.altura_relleno * Lt}
+
+    w_talon_down = soil_t["W_ton_m"] / Lt if Lt > 0 else 0.0
+
+    # Reacción hacia arriba en talón puede traccionar la cara inferior.
+    M_talon_reaccion_inferior = _momento_voladizo_uniforme(q_prom_t, Lt, gamma_u)
+    # Peso de relleno sobre talón genera tracción superior.
+    M_talon_relleno_superior = _momento_voladizo_uniforme(w_talon_down, Lt, gamma_u)
+
+    # Momento firmado informativo: positivo = domina relleno; negativo = domina reacción.
+    Mu_talon_firmado = M_talon_relleno_superior - M_talon_reaccion_inferior
+    Vu_talon = gamma_u * abs(w_talon_down - q_prom_t) * Lt
+
+    # -------------------------
+    # ASIGNACIÓN POR CARA
+    # -------------------------
+    M_inferior = M_puntera_reaccion_inferior + M_talon_reaccion_inferior
+    M_superior = M_puntera_relleno_superior + M_talon_relleno_superior
+
+    d_inferior_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_superior_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+
+    As_inferior_req, As_inferior_flex = _as_req_zapata_por_momento(
+        M_inferior, b_cm, d_inferior_cm, datos.fc, datos.fy, As_min_cara
+    )
+    As_superior_req, As_superior_flex = _as_req_zapata_por_momento(
+        M_superior, b_cm, d_superior_cm, datos.fc, datos.fy, As_min_cara
+    )
+
+    if sep_puntera_manual_cm is None:
+        sep_inferior_cm, As_inferior_prov = seleccionar_separacion(area_barra_cm2(diametro_puntera_mm), As_inferior_req, separacion_max_cm)
+        modo_sep_inferior = "Automática"
+    else:
+        sep_inferior_cm = float(sep_puntera_manual_cm)
+        As_inferior_prov = _as_prov_por_separacion(diametro_puntera_mm, sep_inferior_cm)
+        modo_sep_inferior = "Manual"
+
+    if sep_talon_manual_cm is None:
+        sep_superior_cm, As_superior_prov = seleccionar_separacion(area_barra_cm2(diametro_talon_mm), As_superior_req, separacion_max_cm)
+        modo_sep_superior = "Automática"
+    else:
+        sep_superior_cm = float(sep_talon_manual_cm)
+        As_superior_prov = _as_prov_por_separacion(diametro_talon_mm, sep_superior_cm)
+        modo_sep_superior = "Manual"
+
+    return {
+        "presiones": presiones,
+        "Lp_m": Lp, "Lt_m": Lt,
+
+        "q_puntera_prom_ton_m2": q_prom_p,
+        "w_suelo_puntera_ton_m2": w_puntera_down,
+        "w_neto_puntera_ton_m2": q_prom_p - w_puntera_down,
+        "q_talon_prom_ton_m2": q_prom_t,
+        "w_suelo_talon_ton_m2": w_talon_down,
+        "w_neto_talon_ton_m2": w_talon_down - q_prom_t,
+
+        "M_puntera_reaccion_inferior_ton_m_m": M_puntera_reaccion_inferior,
+        "M_puntera_relleno_superior_ton_m_m": M_puntera_relleno_superior,
+        "M_talon_reaccion_inferior_ton_m_m": M_talon_reaccion_inferior,
+        "M_talon_relleno_superior_ton_m_m": M_talon_relleno_superior,
+
+        "Mu_puntera_ton_m_m": abs(Mu_puntera_firmado),
+        "Mu_puntera_firmado_ton_m_m": Mu_puntera_firmado,
+        "Vu_puntera_ton_m": Vu_puntera,
+        "Mu_talon_ton_m_m": abs(Mu_talon_firmado),
+        "Mu_talon_firmado_ton_m_m": Mu_talon_firmado,
+        "Vu_talon_ton_m": Vu_talon,
+        "Vu_talon_firmado_ton_m": 1.50 * (w_talon_down - q_prom_t) * Lt,
+
+        "M_inferior_critico_ton_m_m": M_inferior,
+        "M_superior_critico_ton_m_m": M_superior,
+        "As_min_zapata_cara_cm2_m": As_min_cara,
+        "As_inferior_flexion_cm2_m": As_inferior_flex,
+        "As_superior_flexion_cm2_m": As_superior_flex,
+
+        "As_inferior_req_cm2_m": As_inferior_req,
+        "As_inferior_prov_cm2_m": As_inferior_prov,
+        "sep_inferior_cm": sep_inferior_cm,
+        "diametro_inferior_mm": diametro_puntera_mm,
+        "modo_sep_inferior": modo_sep_inferior,
+
+        "As_superior_req_cm2_m": As_superior_req,
+        "As_superior_prov_cm2_m": As_superior_prov,
+        "sep_superior_cm": sep_superior_cm,
+        "diametro_superior_mm": diametro_talon_mm,
+        "modo_sep_superior": modo_sep_superior,
+
+        # Alias de compatibilidad con dibujos existentes.
+        "As_puntera_req_cm2_m": As_inferior_req,
+        "As_puntera_prov_cm2_m": As_inferior_prov,
+        "sep_puntera_cm": sep_inferior_cm,
+        "diametro_puntera_mm": diametro_puntera_mm,
+        "modo_sep_puntera": modo_sep_inferior,
+        "As_talon_req_cm2_m": As_superior_req,
+        "As_talon_prov_cm2_m": As_superior_prov,
+        "sep_talon_cm": sep_superior_cm,
+        "diametro_talon_mm": diametro_talon_mm,
+        "modo_sep_talon": modo_sep_superior,
+    }
+
+
+def calcular_diseno_zapata_definitivo(
+    datos: DatosMuro,
+    numero_cunas: int = 180,
+    recubrimiento_cm: float = 7.5,
+    diametro_puntera_mm: float = 16.0,
+    diametro_talon_mm: float = 16.0,
+    separacion_max_cm: float = 30.0,
+    sep_puntera_manual_cm: float | None = None,
+    sep_talon_manual_cm: float | None = None
+) -> dict:
+    res = calcular_diseno_zapata_dinamico(
+        datos, numero_cunas, recubrimiento_cm, diametro_puntera_mm, diametro_talon_mm,
+        separacion_max_cm, sep_puntera_manual_cm, sep_talon_manual_cm
+    )
+
+    b_cm = 100.0
+    h_cm = datos.hz * 100.0
+    d_inferior_cm = h_cm - recubrimiento_cm - (diametro_puntera_mm / 10.0) / 2.0
+    d_superior_cm = h_cm - recubrimiento_cm - (diametro_talon_mm / 10.0) / 2.0
+
+    Lp = max(datos.puntera, 0.0)
+    Lt = max(calcular_talon(datos), 0.0)
+    gamma_u = 1.50
+
+    d_puntera_m = d_inferior_cm / 100.0
+    Lp_crit = max(Lp - d_puntera_m, 0.0)
+    # Para cortante se usa carga neta, no suma de momentos de caras.
+    Vu_puntera_crit = gamma_u * abs(res["w_neto_puntera_ton_m2"]) * Lp_crit
+    cortante_puntera = _cortante_o_no_aplica(Vu_puntera_crit, b_cm, d_inferior_cm, datos.fc, Lp_crit, "Lp")
+
+    d_talon_m = d_superior_cm / 100.0
+    Lt_crit = max(Lt - d_talon_m, 0.0)
+    Vu_talon_crit = gamma_u * abs(res["w_neto_talon_ton_m2"]) * Lt_crit
+    cortante_talon = _cortante_o_no_aplica(Vu_talon_crit, b_cm, d_superior_cm, datos.fc, Lt_crit, "Lt")
+
+    estado_as_inferior = _estado_acero_manual(res["As_inferior_req_cm2_m"], res["As_inferior_prov_cm2_m"])
+    estado_as_superior = _estado_acero_manual(res["As_superior_req_cm2_m"], res["As_superior_prov_cm2_m"])
+
+    def falla(e):
+        txt = str(e).lower()
+        return txt.startswith("no cumple") or "revisar" in txt
+
+    estados = [res["presiones"]["estado_q"], cortante_puntera["estado"], cortante_talon["estado"], estado_as_inferior, estado_as_superior]
+    estado_global = "Revisar" if any(falla(e) for e in estados) else "OK"
+
+    res.update({
+        "d_puntera_cm": d_inferior_cm, "d_talon_cm": d_superior_cm,
+        "d_inferior_cm": d_inferior_cm, "d_superior_cm": d_superior_cm,
+        "Lp_crit_m": Lp_crit, "Lt_crit_m": Lt_crit,
+        "Vu_puntera_crit_ton_m": Vu_puntera_crit,
+        "Vu_talon_crit_ton_m": Vu_talon_crit,
+        "cortante_puntera": cortante_puntera,
+        "cortante_talon": cortante_talon,
+        "estado_as_inferior": estado_as_inferior,
+        "estado_as_superior": estado_as_superior,
+        "estado_as_puntera": estado_as_inferior,
+        "estado_as_talon": estado_as_superior,
+        "ld_puntera_cm": 0.0, "ld_talon_cm": 0.0,
+        "longitud_disponible_puntera_cm": 0.0, "longitud_disponible_talon_cm": 0.0,
+        "estado_ld_puntera": "No se evalúa en dashboard",
+        "estado_ld_talon": "No se evalúa en dashboard",
+        "estado_global_zapata": estado_global,
+    })
+    return res
+
+
+def tabla_diseno_zapata_definitivo(resultado: dict) -> pd.DataFrame:
+    filas = [
+        ("Estado global zapata", resultado["estado_global_zapata"], "-"),
+        ("qmax", resultado["presiones"]["qmax_ton_m2"], "ton/m²"),
+        ("qmin", resultado["presiones"]["qmin_ton_m2"], "ton/m²"),
+        ("qa", resultado["presiones"]["q_adm_ton_m2"], "ton/m²"),
+        ("Estado presión admisible", resultado["presiones"]["estado_q"], "-"),
+
+        ("Reacción suelo puntera", resultado.get("q_puntera_prom_ton_m2", 0.0), "ton/m²"),
+        ("Relleno sobre puntera", resultado.get("w_suelo_puntera_ton_m2", 0.0), "ton/m²"),
+        ("M puntera por reacción → inferior", resultado.get("M_puntera_reaccion_inferior_ton_m_m", 0.0), "ton·m/m"),
+        ("M puntera por relleno → superior", resultado.get("M_puntera_relleno_superior_ton_m_m", 0.0), "ton·m/m"),
+
+        ("Reacción suelo talón", resultado.get("q_talon_prom_ton_m2", 0.0), "ton/m²"),
+        ("Relleno sobre talón", resultado.get("w_suelo_talon_ton_m2", 0.0), "ton/m²"),
+        ("M talón por reacción → inferior", resultado.get("M_talon_reaccion_inferior_ton_m_m", 0.0), "ton·m/m"),
+        ("M talón por relleno → superior", resultado.get("M_talon_relleno_superior_ton_m_m", 0.0), "ton·m/m"),
+
+        ("Momento crítico cara inferior", resultado["M_inferior_critico_ton_m_m"], "ton·m/m"),
+        ("As flexión inferior", resultado["As_inferior_flexion_cm2_m"], "cm²/m"),
+        ("As mínimo por cara", resultado["As_min_zapata_cara_cm2_m"], "cm²/m"),
+        ("As inferior requerido", resultado["As_inferior_req_cm2_m"], "cm²/m"),
+        ("As inferior provisto", resultado["As_inferior_prov_cm2_m"], "cm²/m"),
+        ("Armado inferior zapata", _formato_armado(resultado["diametro_inferior_mm"], resultado["sep_inferior_cm"]), "mm @ cm"),
+        ("Estado flexión acero inferior", resultado.get("estado_as_inferior", "No aplica"), "-"),
+
+        ("Momento crítico cara superior", resultado["M_superior_critico_ton_m_m"], "ton·m/m"),
+        ("As flexión superior", resultado["As_superior_flexion_cm2_m"], "cm²/m"),
+        ("As mínimo por cara", resultado["As_min_zapata_cara_cm2_m"], "cm²/m"),
+        ("As superior requerido", resultado["As_superior_req_cm2_m"], "cm²/m"),
+        ("As superior provisto", resultado["As_superior_prov_cm2_m"], "cm²/m"),
+        ("Armado superior zapata", _formato_armado(resultado["diametro_superior_mm"], resultado["sep_superior_cm"]), "mm @ cm"),
+        ("Estado flexión acero superior", resultado.get("estado_as_superior", "No aplica"), "-"),
+
+        ("Vu puntera crítico", resultado["Vu_puntera_crit_ton_m"], "ton/m"),
+        ("φVc puntera", resultado["cortante_puntera"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc puntera", resultado["cortante_puntera"]["relacion"], "-"),
+        ("Estado cortante puntera", resultado["cortante_puntera"]["estado"], "-"),
+
+        ("Vu talón crítico", resultado["Vu_talon_crit_ton_m"], "ton/m"),
+        ("φVc talón", resultado["cortante_talon"]["phi_Vc_ton_m"], "ton/m"),
+        ("Relación Vu/φVc talón", resultado["cortante_talon"]["relacion"], "-"),
+        ("Estado cortante talón", resultado["cortante_talon"]["estado"], "-"),
+    ]
+    return pd.DataFrame(filas, columns=["Verificación", "Valor", "Unidad"])

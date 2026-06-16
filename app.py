@@ -531,7 +531,9 @@ with col_der:
                 recubrimiento_cm=recubrimiento_cm,
                 diametro_puntera_mm=float(diametro_zapata_inferior_mm),
                 diametro_talon_mm=float(diametro_zapata_superior_mm),
-                separacion_max_cm=separacion_max_cm
+                separacion_max_cm=separacion_max_cm,
+                sep_puntera_manual_cm=sep_zapata_inferior_cm,
+                sep_talon_manual_cm=sep_zapata_superior_cm
             )
 
             presiones = resultado_zapata["presiones"]
@@ -539,8 +541,8 @@ with col_der:
             col_z1, col_z2, col_z3, col_z4 = st.columns(4)
             col_z1.metric("Estado zapata", resultado_zapata["estado_global_zapata"])
             col_z2.metric("qmax", f"{presiones['qmax_ton_m2']:.2f} ton/m²")
-            col_z3.metric("Mu puntera", f"{resultado_zapata['Mu_puntera_ton_m_m']:.3f} ton·m/m")
-            col_z4.metric("Mu talón", f"{resultado_zapata['Mu_talon_ton_m_m']:.3f} ton·m/m")
+            col_z3.metric("M inferior crítico", f"{resultado_zapata.get('M_inferior_critico_ton_m_m', 0.0):.3f} ton·m/m")
+            col_z4.metric("M superior crítico", f"{resultado_zapata.get('M_superior_critico_ton_m_m', 0.0):.3f} ton·m/m")
 
             col_za1, col_za2, col_za3, col_za4 = st.columns(4)
             col_za1.metric("As inferior req.", f"{resultado_zapata['As_puntera_req_cm2_m']:.2f} cm²/m")
@@ -670,7 +672,9 @@ with col_der:
                 recubrimiento_cm=recubrimiento_cm,
                 diametro_puntera_mm=float(diametro_zapata_inferior_mm),
                 diametro_talon_mm=float(diametro_zapata_superior_mm),
-                separacion_max_cm=separacion_max_cm
+                separacion_max_cm=separacion_max_cm,
+                sep_puntera_manual_cm=sep_zapata_inferior_cm,
+                sep_talon_manual_cm=sep_zapata_superior_cm
             )
 
             resultado_dentellon = fm.calcular_deslizamiento_y_llave(
