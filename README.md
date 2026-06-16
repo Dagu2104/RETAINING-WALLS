@@ -363,3 +363,11 @@ incluye la función correspondiente. Para evitar errores en Streamlit Cloud, sub
 - `requirements.txt`
 
 Luego reiniciar la app desde **Manage app → Reboot app**.
+
+
+## Ajuste de detalle del dentellón
+
+Se actualizó el gráfico del dentellón para que:
+- el estribo cerrado suba hasta el top de la zapata;
+- los aceros longitudinales también lleguen al top de la zapata;
+- cuando la profundidad del dentellón sea mayor a 0.80 m, se muestren aceros distribuidos en ambas caras laterales.
