@@ -204,13 +204,13 @@ def dibujar_cotas_principales(ax, datos: DatosMuro, geometria: dict | None = Non
     talon = calcular_talon(datos)
 
     # Cotas de puntera y talón.
-    y_cota_puntera_talon = -datos.hz - 0.47
-    y_texto_puntera_talon = -datos.hz - 0.60
+    y_cota_puntera_talon = -datos.hz - 0.18
+    y_texto_puntera_talon = -datos.hz - 0.26
 
     # Cota del ancho total B.
     # Para bajar más la flecha y el texto de B, aumenta estos valores: 1.35 y 1.48.
-    y_cota_total = -datos.hz - 0.93
-    y_texto_total = -datos.hz - 1.1
+    y_cota_total = -datos.hz - 1.35
+    y_texto_total = -datos.hz - 1.48
 
     # Cota vertical de altura del fuste H.
     ax.annotate(
@@ -337,7 +337,7 @@ def dibujar_muro(ax, datos: DatosMuro, geometria: dict, tamano_texto: int = 8):
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
     ax.set_title("Geometría del muro de contención")
-    ax.legend(loc="upper right", fontsize=max(tamano_texto - 1, 7))
+    # Leyenda eliminada a pedido del usuario para dejar el dibujo más limpio.
 
 
 def resumen_geometria(datos: DatosMuro) -> pd.DataFrame:

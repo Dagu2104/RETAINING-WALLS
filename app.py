@@ -198,11 +198,7 @@ with col_izq:
     else:
         st.success("La geometría ingresada es válida para dibujo preliminar.")
 
-    st.dataframe(
-        resumen_geometria(datos),
-        use_container_width=True,
-        hide_index=True
-    )
+    st.caption("La tabla resumen se eliminó de la interfaz. Los datos se conservan para cálculos y memoria Word.")
 
     st.info(
         "Este módulo solo dibuja la geometría. Luego se pueden agregar: "

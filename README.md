@@ -116,3 +116,26 @@ y la llamada correcta:
 ```python
 dibujar_muro(ax, datos, geometria, tamano_texto=tamano_texto_cotas)
 ```
+
+
+## Tabla resumen en pantalla
+
+La tabla resumen de geometría se eliminó de la interfaz principal para dejar más espacio al dibujo.  
+Los datos no se eliminaron del programa: siguen disponibles internamente para cálculos y para la memoria Word.
+
+
+## Leyenda del dibujo
+
+La leyenda del gráfico fue eliminada de la imagen para que el esquema del muro quede más limpio y con más espacio visible.
+
+Si luego quieres volver a mostrarla, en `funciones_muro.py` debes revisar la función:
+
+```python
+def dibujar_muro(...)
+```
+
+y restaurar una línea como:
+
+```python
+ax.legend(loc="upper right")
+```
