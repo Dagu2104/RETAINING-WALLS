@@ -506,3 +506,16 @@ Internamente:
 - el talón se asocia al acero superior.
 
 Esto permite que una cara tenga mayor acero que la otra cuando el momento crítico sea distinto.
+
+
+## Corrección de NaN en acero inferior cuando no hay puntera
+
+Se corrigió el criterio de diseño de la zapata:
+
+- La app sigue calculando momentos de puntera y talón por separado.
+- Pero el acero se diseña y reporta por cara:
+  - cara inferior;
+  - cara superior.
+- La cara inferior toma el momento de puntera cuando existe. Si `puntera = 0`, no se coloca `NaN`; se asigna el acero mínimo por cara de la zapata.
+- La cara superior toma el momento del talón.
+- Así el elemento zapata siempre tiene acero inferior y superior, aunque una de las zonas no tenga voladizo geométrico.
