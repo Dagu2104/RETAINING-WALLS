@@ -553,3 +553,21 @@ Luego se suma la demanda que tracciona la misma cara y se diseña:
 - acero superior de zapata.
 
 También se corrigieron las llamadas de la pestaña Zapata para que usen las separaciones manuales ingresadas por el usuario. Antes en esa pestaña se estaba usando la separación automática en algunas llamadas.
+
+
+## Corrección final: momento neto con signo
+
+Se corrigió la lógica de flexión de zapata:
+
+- En puntera se combinan simultáneamente:
+  - reacción del suelo hacia arriba;
+  - peso propio de zapata hacia abajo;
+  - relleno sobre puntera hacia abajo.
+- En talón se combinan simultáneamente:
+  - reacción del suelo hacia arriba;
+  - peso propio de zapata hacia abajo;
+  - relleno sobre talón hacia abajo.
+- Para cada tramo se obtiene un momento resultante con signo.
+- El signo determina si la tracción está en cara inferior o superior.
+- Cada cara se diseña con el mayor momento que la tracciona.
+- Si una cara no tiene momento de diseño, mantiene acero mínimo.
